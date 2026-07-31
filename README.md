@@ -43,6 +43,8 @@ EMAIL_FROM=noreply@taskhub.io
 Mở terminal tại thư mục gốc của dự án (`TaskHub`) và chạy:
 
 ```bash
+# Khởi động database và backend
+docker compose down -v
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ```
 
@@ -53,3 +55,16 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 - **Backend API**: `http://localhost:8000`
 - **Swagger UI**: `http://localhost:8000/docs`
 - **ReDoc**: `http://localhost:8000/redoc`
+
+---
+
+## 4. Tài khoản mẫu
+
+Tất cả tài khoản dùng mật khẩu chung: **`Password123!`**
+
+| Email | Họ và tên | Vai trò hệ thống | Vai trò Workspace | Ghi chú |
+|---|---|---|---|---|
+| `admin@taskhub.io` | Admin User | ADMIN | — | Quản trị viên toàn hệ thống (Bypass RBAC) |
+| `owner@taskhub.io` | Alice Owner | MEMBER | OWNER | Chủ sở hữu Workspace "TaskHub Engineering" & "Marketing Hub" |
+| `editor@taskhub.io` | Bob Editor | MEMBER | EDITOR | Thành viên thực thi task (Assignee của 4 task mẫu) |
+| `viewer@taskhub.io` | Carol Viewer | MEMBER | VIEWER | Thành viên xem/thảo luận trong Workspace |
