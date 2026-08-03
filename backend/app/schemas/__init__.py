@@ -1,5 +1,12 @@
 """Pydantic schemas package."""
 
+from app.schemas.auth import (
+    LoginRequest,
+    NewAccessTokenResponse,
+    RefreshTokenRequest,
+    RegisterRequest,
+    TokenResponse,
+)
 from app.schemas.common import (
     ErrorBody,
     ErrorDetail,
@@ -8,6 +15,7 @@ from app.schemas.common import (
     PaginationMeta,
     SuccessResponse,
 )
+from app.schemas.user import UserResponse
 
 __all__ = [
     "PaginationMeta",
@@ -16,4 +24,10 @@ __all__ = [
     "ErrorDetail",
     "ErrorBody",
     "ErrorResponse",
+    "UserResponse",
+    "RegisterRequest",
+    "LoginRequest",
+    "RefreshTokenRequest",
+    "TokenResponse",
+    "NewAccessTokenResponse",
 ]
