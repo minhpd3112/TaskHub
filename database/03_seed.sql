@@ -3,10 +3,10 @@
 -- 1. Users
 INSERT INTO users (id, email, full_name, hashed_password, role, is_active, created_at, updated_at)
 VALUES 
-    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'admin@taskhub.io', 'Admin User', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj3jp0ZNQVEK', 'ADMIN', true, NOW(), NOW()),
-    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'owner@taskhub.io', 'Alice Owner', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj3jp0ZNQVEK', 'MEMBER', true, NOW(), NOW()),
-    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'editor@taskhub.io', 'Bob Editor', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj3jp0ZNQVEK', 'MEMBER', true, NOW(), NOW()),
-    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'viewer@taskhub.io', 'Carol Viewer', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj3jp0ZNQVEK', 'MEMBER', true, NOW(), NOW())
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'admin@taskhub.io', 'Admin User', '$2b$12$PU9BlXIkzpRrXcLU1rlAjuQeAeLo2A3tnkmYyJh6Uxual2ui54LAi', 'ADMIN', true, NOW(), NOW()),
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'owner@taskhub.io', 'Alice Owner', '$2b$12$PU9BlXIkzpRrXcLU1rlAjuQeAeLo2A3tnkmYyJh6Uxual2ui54LAi', 'MEMBER', true, NOW(), NOW()),
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'editor@taskhub.io', 'Bob Editor', '$2b$12$PU9BlXIkzpRrXcLU1rlAjuQeAeLo2A3tnkmYyJh6Uxual2ui54LAi', 'MEMBER', true, NOW(), NOW()),
+    ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44', 'viewer@taskhub.io', 'Carol Viewer', '$2b$12$PU9BlXIkzpRrXcLU1rlAjuQeAeLo2A3tnkmYyJh6Uxual2ui54LAi', 'MEMBER', true, NOW(), NOW())
 ON CONFLICT (id) DO NOTHING;
 
 -- 2. Workspaces
