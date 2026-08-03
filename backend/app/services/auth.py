@@ -102,9 +102,7 @@ class AuthService:
 
         sub = payload.get("sub")
         if not sub:
-            raise UnauthorizedError(
-                "Invalid refresh token payload.", code="REFRESH_TOKEN_INVALID"
-            )
+            raise UnauthorizedError("Invalid refresh token payload.", code="REFRESH_TOKEN_INVALID")
 
         try:
             user_id = UUID(sub)
