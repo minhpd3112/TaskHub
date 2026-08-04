@@ -42,3 +42,33 @@ class ProjectResponse(BaseModel):
     status: ProjectStatus
     created_at: datetime
     updated_at: datetime | None = None
+
+
+class ProjectListItemResponse(BaseModel):
+    """Response payload representing a project item in list response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    workspace_id: UUID
+    name: str
+    description: str | None = None
+    status: ProjectStatus
+    task_count: int = 0
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class ProjectDetailResponse(BaseModel):
+    """Response payload representing detailed project info."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    workspace_id: UUID
+    name: str
+    description: str | None = None
+    status: ProjectStatus
+    task_count: int = 0
+    created_at: datetime
+    updated_at: datetime | None = None

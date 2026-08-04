@@ -129,4 +129,3 @@ def require_owner() -> Callable[..., Any]:
 def require_member() -> Callable[..., Any]:
     """Shortcut dependency requiring at least VIEWER role in workspace."""
     return require_workspace_role(WorkspaceRole.VIEWER)
-

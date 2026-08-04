@@ -6,4 +6,3 @@ from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 
 __all__ = ["BaseRepository", "UserRepository", "WorkspaceRepository", "ProjectRepository"]
-
