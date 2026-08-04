@@ -478,3 +478,252 @@ async def test_get_task_detail_api_editor_other_task_404(async_client: AsyncClie
     )
     assert res.status_code == 404
     assert res.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_update_task_api_success_owner(async_client: AsyncClient) -> None:
+    """Integration test: OWNER updates task successfully -> 200 OK."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="upd_owner")
+    _, assignee_id = await _create_test_user(async_client, prefix="upd_assignee")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id,
+        member_id=assignee_id,
+        role=WorkspaceRole.EDITOR,
+    )
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Update Task Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Initial Task Title", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    update_payload = {
+        "title": "Updated Task Title",
+        "description": "Updated Task Description",
+        "priority": "URGENT",
+        "due_date": "2026-12-31",
+        "assignee_id": str(assignee_id),
+    }
+
+    patch_res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json=update_payload,
+        headers=owner_headers,
+    )
+
+    assert patch_res.status_code == 200
+    data = patch_res.json()["data"]
+    assert data["id"] == task_id
+    assert data["title"] == "Updated Task Title"
+    assert data["description"] == "Updated Task Description"
+    assert data["priority"] == "URGENT"
+    assert data["due_date"] == "2026-12-31"
+    assert data["assignee_id"] == str(assignee_id)
+    assert data["updated_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_update_task_api_forbidden_editor(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR calling PATCH /tasks/{task_id} -> 403 FORBIDDEN."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="upd_ed_owner")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="upd_ed_editor")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id,
+        member_id=editor_id,
+        role=WorkspaceRole.EDITOR,
+    )
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Editor Update Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Task Assigned to Editor", "assignee_id": str(editor_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    # Editor attempts full update
+    patch_res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={"title": "Editor Changed Title"},
+        headers=editor_headers,
+    )
+
+    assert patch_res.status_code == 403
+    assert patch_res.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_update_task_api_forbidden_viewer(async_client: AsyncClient) -> None:
+    """Integration test: VIEWER calling PATCH /tasks/{task_id} -> 403 FORBIDDEN."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="upd_vw_owner")
+    viewer_headers, viewer_id = await _create_test_user(async_client, prefix="upd_vw_viewer")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id,
+        member_id=viewer_id,
+        role=WorkspaceRole.VIEWER,
+    )
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Viewer Update Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Viewer Accessible Task", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    patch_res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={"title": "Viewer Changed Title"},
+        headers=viewer_headers,
+    )
+
+    assert patch_res.status_code == 403
+    assert patch_res.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_update_task_api_invalid_assignee(async_client: AsyncClient) -> None:
+    """Integration test: OWNER updating assignee to non-workspace member -> 400 INVALID_ASSIGNEE."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="upd_inv_owner")
+
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Invalid Assignee Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Valid Task", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    non_member_id = uuid4()
+    patch_res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={"assignee_id": str(non_member_id)},
+        headers=owner_headers,
+    )
+
+    assert patch_res.status_code == 400
+    assert patch_res.json()["error"]["code"] == "INVALID_ASSIGNEE"
+
+
+@pytest.mark.asyncio
+async def test_update_task_api_archived_project(async_client: AsyncClient) -> None:
+    """Integration test: OWNER updating task in ARCHIVED project -> 400 PROJECT_ARCHIVED."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="upd_arch_owner")
+
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Archived Update Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Task Before Archive", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    # Archive project
+    archive_res = await async_client.patch(
+        f"/api/v1/projects/{project_id}/archive",
+        headers=owner_headers,
+    )
+    assert archive_res.status_code == 200
+
+    # Attempt to update task
+    patch_res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={"title": "Update Archived Task"},
+        headers=owner_headers,
+    )
+
+    assert patch_res.status_code == 400
+    assert patch_res.json()["error"]["code"] == "PROJECT_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_update_task_api_not_found(async_client: AsyncClient) -> None:
+    """Integration test: Updating non-existent task or IDOR -> 404 NOT_FOUND."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="upd_nf_owner")
+    random_task_id = uuid4()
+
+    patch_res = await async_client.patch(
+        f"/api/v1/tasks/{random_task_id}",
+        json={"title": "Random Task Update"},
+        headers=owner_headers,
+    )
+
+    assert patch_res.status_code == 404
+    assert patch_res.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_update_task_api_validation_error(async_client: AsyncClient) -> None:
+    """Integration test: Payload with empty title or >500 chars -> 422 UNPROCESSABLE_ENTITY."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="upd_val_owner")
+
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Validation Error Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Valid Task Title", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    # Empty title
+    empty_res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={"title": "   "},
+        headers=owner_headers,
+    )
+    assert empty_res.status_code == 422
+
+    # Title > 500 chars
+    long_res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={"title": "A" * 501},
+        headers=owner_headers,
+    )
+    assert long_res.status_code == 422

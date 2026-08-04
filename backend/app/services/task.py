@@ -16,7 +16,7 @@ from app.repositories.project import ProjectRepository
 from app.repositories.task import TaskRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.common import PaginatedResponse, PaginationMeta
-from app.schemas.task import TaskCreateRequest, TaskResponse
+from app.schemas.task import TaskCreateRequest, TaskResponse, TaskUpdateRequest
 from app.services.email import EmailService
 
 logger = logging.getLogger(__name__)
@@ -237,3 +237,70 @@ class TaskService:
                 raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
 
         return task
+
+    async def update_task(
+        self,
+        task_id: UUID,
+        current_user: User,
+        data: TaskUpdateRequest,
+    ) -> Task:
+        """Update task information with full RBAC and business rules checks.
+
+        Raises:
+            NotFoundError: If task does not exist or current user is not a workspace member.
+            ForbiddenError: If current user's role is not OWNER (or system ADMIN).
+            ValidationError: If project is ARCHIVED or assignee_id is not a workspace member.
+        """
+        # 1. Fetch task with eager loaded project & workspace
+        task = await self.task_repo.get_task_detail(task_id)
+        if not task:
+            raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+        # 2. Check existence & IDOR Guard & RBAC Permissions
+        if current_user.role != UserRole.ADMIN:
+            member = await self.workspace_repo.get_member(
+                task.project.workspace_id, current_user.id
+            )
+            if not member:
+                raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+            if member.role != WorkspaceRole.OWNER:
+                raise ForbiddenError(
+                    "Required role: OWNER",
+                    code="FORBIDDEN",
+                )
+
+        # 3. Check project status (400 PROJECT_ARCHIVED)
+        if task.project.status == ProjectStatus.ARCHIVED:
+            raise ValidationError(
+                "Cannot update task in an archived project",
+                code="PROJECT_ARCHIVED",
+            )
+
+        # 4. Check new assignee if provided and changed
+        if data.assignee_id is not None and data.assignee_id != task.assignee_id:
+            assignee_member = await self.workspace_repo.get_member(
+                task.project.workspace_id, data.assignee_id
+            )
+            if not assignee_member:
+                raise ValidationError(
+                    "Assignee must be a member of the workspace",
+                    code="INVALID_ASSIGNEE",
+                )
+
+        # 5. Perform update in database
+        update_dict = data.model_dump(exclude_unset=True)
+        updated_task = await self.task_repo.update_task(task_id, **update_dict)
+        if not updated_task:
+            raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+        # 6. Invalidate Redis Cache for project tasks list
+        if self.redis:
+            try:
+                keys = await self.redis.keys(f"tasks:project:{task.project_id}:*")
+                if keys:
+                    await self.redis.delete(*keys)
+            except Exception as exc:
+                logger.warning(f"Failed to invalidate task list cache in Redis: {exc}")
+
+        return updated_task

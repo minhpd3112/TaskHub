@@ -11,7 +11,7 @@ from app.core.redis import get_redis
 from app.models.enums import TaskPriority, TaskStatus
 from app.models.user import User
 from app.schemas.common import PaginatedResponse, SuccessResponse
-from app.schemas.task import TaskCreateRequest, TaskDetailResponse, TaskResponse
+from app.schemas.task import TaskCreateRequest, TaskDetailResponse, TaskResponse, TaskUpdateRequest
 from app.services.task import TaskService
 
 router = APIRouter()
@@ -112,3 +112,29 @@ async def get_task_detail(
         current_user=current_user,
     )
     return SuccessResponse(data=TaskDetailResponse.model_validate(task))
+
+
+@router.patch(
+    "/tasks/{task_id}",
+    response_model=SuccessResponse[TaskResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Cập nhật thông tin công việc",
+    description=(
+        "Cập nhật tiêu đề, mô tả, người phụ trách, mức độ ưu tiên, deadline của task. "
+        "Chỉ dành cho OWNER hoặc ADMIN."
+    ),
+    operation_id="capNhatCongViec",
+)
+async def update_task(
+    task_id: UUID,
+    body: TaskUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    service: TaskService = Depends(get_task_service),
+) -> SuccessResponse[TaskResponse]:
+    """Update an existing task."""
+    task = await service.update_task(
+        task_id=task_id,
+        current_user=current_user,
+        data=body,
+    )
+    return SuccessResponse(data=TaskResponse.model_validate(task))

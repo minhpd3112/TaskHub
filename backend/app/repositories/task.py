@@ -1,4 +1,5 @@
-from datetime import date
+from datetime import UTC, date, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -119,3 +120,18 @@ class TaskRepository(BaseRepository[Task]):
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def update_task(self, task_id: UUID, **data: Any) -> Task | None:
+        """Update task attributes and return with all relationships eager-loaded."""
+        task = await self.get_by_id(task_id)
+        if not task:
+            return None
+
+        update_fields = {k: v for k, v in data.items() if v is not None}
+        update_fields["updated_at"] = datetime.now(UTC)
+
+        for key, value in update_fields.items():
+            setattr(task, key, value)
+
+        await self.db.commit()
+        return await self.get_task_detail(task_id)

@@ -11,7 +11,7 @@ from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
 from app.models.workspace import WorkspaceMember
-from app.schemas.task import TaskCreateRequest
+from app.schemas.task import TaskCreateRequest, TaskUpdateRequest
 from app.services.task import TaskService
 
 
@@ -467,3 +467,243 @@ async def test_get_task_detail_editor_other_task_raises_404(task_service: TaskSe
 
     assert exc_info.value.code == "NOT_FOUND"
     assert "Task không tồn tại" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_update_task_success_owner(task_service: TaskService) -> None:
+    """Test updating task successfully by workspace OWNER."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    owner_user = User(
+        id=uuid4(), email="owner@example.com", full_name="Owner User", role=UserRole.MEMBER
+    )
+    assignee_user = User(
+        id=uuid4(), email="assignee@example.com", full_name="Assignee User", role=UserRole.MEMBER
+    )
+
+    sample_project = Project(
+        id=project_id, workspace_id=workspace_id, name="Test Project", status=ProjectStatus.ACTIVE
+    )
+    owner_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=owner_user.id, role=WorkspaceRole.OWNER
+    )
+    assignee_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=assignee_user.id, role=WorkspaceRole.EDITOR
+    )
+
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        created_by=owner_user.id,
+        assignee_id=owner_user.id,
+        title="Old Title",
+        description="Old Description",
+        status=TaskStatus.TODO,
+        priority=TaskPriority.MEDIUM,
+        due_date=date(2026, 1, 1),
+    )
+    updated_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        created_by=owner_user.id,
+        assignee_id=assignee_user.id,
+        title="New Title",
+        description="New Description",
+        status=TaskStatus.IN_PROGRESS,
+        priority=TaskPriority.HIGH,
+        due_date=date(2026, 2, 1),
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(
+        side_effect=lambda ws_id, u_id: owner_member if u_id == owner_user.id else assignee_member
+    )
+    task_service.task_repo.update_task = AsyncMock(return_value=updated_task)
+    mock_redis = AsyncMock()
+    mock_redis.keys = AsyncMock(return_value=[b"tasks:project:key1"])
+    task_service.redis = mock_redis
+
+    dto = TaskUpdateRequest(
+        title="New Title",
+        description="New Description",
+        status=TaskStatus.IN_PROGRESS,
+        priority=TaskPriority.HIGH,
+        due_date=date(2026, 2, 1),
+        assignee_id=assignee_user.id,
+    )
+
+    result = await task_service.update_task(task_id=task_id, current_user=owner_user, data=dto)
+
+    assert result.title == "New Title"
+    assert result.priority == TaskPriority.HIGH
+    mock_redis.delete.assert_called_once_with(b"tasks:project:key1")
+
+
+@pytest.mark.asyncio
+async def test_update_task_success_admin(task_service: TaskService) -> None:
+    """Test updating task successfully by system ADMIN."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    admin_user = User(
+        id=uuid4(), email="admin@example.com", full_name="System Admin", role=UserRole.ADMIN
+    )
+
+    sample_project = Project(
+        id=project_id, workspace_id=workspace_id, name="Test Project", status=ProjectStatus.ACTIVE
+    )
+    existing_task = Task(
+        id=task_id, project_id=project_id, project=sample_project, assignee_id=uuid4(), title="Task"
+    )
+    updated_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=uuid4(),
+        title="Updated Task",
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.task_repo.update_task = AsyncMock(return_value=updated_task)
+
+    dto = TaskUpdateRequest(title="Updated Task")
+    result = await task_service.update_task(task_id=task_id, current_user=admin_user, data=dto)
+
+    assert result.title == "Updated Task"
+
+
+@pytest.mark.asyncio
+async def test_update_task_forbidden_editor(task_service: TaskService) -> None:
+    """Test updating task by EDITOR raises 403 Forbidden."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    editor_user = User(id=uuid4(), email="editor@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=editor_user.id, role=WorkspaceRole.EDITOR
+    )
+
+    existing_task = Task(
+        id=task_id, project_id=project_id, project=sample_project, assignee_id=editor_user.id
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+
+    dto = TaskUpdateRequest(title="Attempted Update")
+    with pytest.raises(ForbiddenError) as exc_info:
+        await task_service.update_task(task_id=task_id, current_user=editor_user, data=dto)
+
+    assert exc_info.value.code == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_update_task_forbidden_viewer(task_service: TaskService) -> None:
+    """Test updating task by VIEWER raises 403 Forbidden."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    viewer_user = User(id=uuid4(), email="viewer@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    viewer_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=viewer_user.id, role=WorkspaceRole.VIEWER
+    )
+
+    existing_task = Task(
+        id=task_id, project_id=project_id, project=sample_project, assignee_id=uuid4()
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=viewer_member)
+
+    dto = TaskUpdateRequest(title="Attempted Update")
+    with pytest.raises(ForbiddenError) as exc_info:
+        await task_service.update_task(task_id=task_id, current_user=viewer_user, data=dto)
+
+    assert exc_info.value.code == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_update_task_invalid_assignee(task_service: TaskService) -> None:
+    """Test updating task assignee to a non-workspace member raises 400 INVALID_ASSIGNEE."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    owner_user = User(id=uuid4(), email="owner@example.com", role=UserRole.MEMBER)
+    non_member_id = uuid4()
+
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    owner_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=owner_user.id, role=WorkspaceRole.OWNER
+    )
+
+    existing_task = Task(
+        id=task_id, project_id=project_id, project=sample_project, assignee_id=owner_user.id
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(
+        side_effect=lambda ws_id, u_id: owner_member if u_id == owner_user.id else None
+    )
+
+    dto = TaskUpdateRequest(assignee_id=non_member_id)
+    with pytest.raises(ValidationError) as exc_info:
+        await task_service.update_task(task_id=task_id, current_user=owner_user, data=dto)
+
+    assert exc_info.value.code == "INVALID_ASSIGNEE"
+
+
+@pytest.mark.asyncio
+async def test_update_task_archived_project(task_service: TaskService) -> None:
+    """Test updating task in an archived project raises 400 PROJECT_ARCHIVED."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    owner_user = User(id=uuid4(), email="owner@example.com", role=UserRole.MEMBER)
+
+    archived_project = Project(
+        id=project_id, workspace_id=workspace_id, status=ProjectStatus.ARCHIVED
+    )
+    owner_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=owner_user.id, role=WorkspaceRole.OWNER
+    )
+
+    existing_task = Task(
+        id=task_id, project_id=project_id, project=archived_project, assignee_id=owner_user.id
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=owner_member)
+
+    dto = TaskUpdateRequest(title="New Title")
+    with pytest.raises(ValidationError) as exc_info:
+        await task_service.update_task(task_id=task_id, current_user=owner_user, data=dto)
+
+    assert exc_info.value.code == "PROJECT_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_update_task_not_found_idor(task_service: TaskService) -> None:
+    """Test updating non-existent task or by non-workspace member raises 404 NOT_FOUND."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    stranger_user = User(id=uuid4(), email="stranger@example.com", role=UserRole.MEMBER)
+
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    existing_task = Task(
+        id=task_id, project_id=project_id, project=sample_project, assignee_id=uuid4()
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=None)  # Stranger not member!
+
+    dto = TaskUpdateRequest(title="New Title")
+    with pytest.raises(NotFoundError) as exc_info:
+        await task_service.update_task(task_id=task_id, current_user=stranger_user, data=dto)
+
+    assert exc_info.value.code == "NOT_FOUND"

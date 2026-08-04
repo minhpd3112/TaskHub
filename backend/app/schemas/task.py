@@ -46,6 +46,33 @@ class TaskCreateRequest(BaseModel):
         return stripped
 
 
+class TaskUpdateRequest(BaseModel):
+    """Payload for updating an existing task."""
+
+    title: str | None = None
+    description: str | None = None
+    status: TaskStatus | None = None
+    priority: TaskPriority | None = None
+    assignee_id: UUID | None = None
+    due_date: date | None = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if not v or len(v) > 500:
+                raise ValueError("Title must not be empty and cannot exceed 500 characters")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 5000:
+            raise ValueError("Description cannot exceed 5000 characters")
+        return v
+
+
 class AssigneeResponse(BaseModel):
     """Summarized response model for task assignee user."""
 
