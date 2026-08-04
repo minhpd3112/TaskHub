@@ -335,3 +335,182 @@ async def test_remove_member_success_reassigns_tasks(
         ws_id, target_user_id
     )
     workspace_service.db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_workspace_success_as_owner(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test OWNER can update workspace name successfully."""
+    ws_id = uuid4()
+    now = datetime.now(UTC)
+    ws = Workspace(id=ws_id, name="Old Name", owner_id=sample_user.id, created_at=now)
+    owner_member = WorkspaceMember(
+        workspace_id=ws_id, user_id=sample_user.id, role=WorkspaceRole.OWNER, joined_at=now
+    )
+    updated_ws = Workspace(id=ws_id, name="New Name", owner_id=sample_user.id, created_at=now)
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(return_value=owner_member)
+    workspace_service.workspace_repo.update_workspace = AsyncMock(return_value=updated_ws)
+
+    from app.schemas.workspace import WorkspaceUpdateRequest
+
+    dto = WorkspaceUpdateRequest(name="New Name")
+    response = await workspace_service.update_workspace(sample_user, ws_id, dto)
+
+    workspace_service.workspace_repo.update_workspace.assert_called_once_with(ws_id, "New Name")
+    workspace_service.db.commit.assert_called_once()
+    assert response.name == "New Name"
+
+
+@pytest.mark.asyncio
+async def test_update_workspace_success_as_admin(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test system ADMIN can update workspace name successfully even if not a member."""
+    admin_user = User(
+        id=uuid4(),
+        email="admin@taskhub.io",
+        full_name="System Admin",
+        hashed_password="hash",
+        role=UserRole.ADMIN,
+        is_active=True,
+    )
+    ws_id = uuid4()
+    now = datetime.now(UTC)
+    ws = Workspace(id=ws_id, name="Old Name", owner_id=sample_user.id, created_at=now)
+    updated_ws = Workspace(
+        id=ws_id, name="Updated By Admin", owner_id=sample_user.id, created_at=now
+    )
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_repo.update_workspace = AsyncMock(return_value=updated_ws)
+
+    from app.schemas.workspace import WorkspaceUpdateRequest
+
+    dto = WorkspaceUpdateRequest(name="Updated By Admin")
+    response = await workspace_service.update_workspace(admin_user, ws_id, dto)
+
+    workspace_service.workspace_repo.update_workspace.assert_called_once_with(
+        ws_id, "Updated By Admin"
+    )
+    assert response.name == "Updated By Admin"
+
+
+@pytest.mark.asyncio
+async def test_update_workspace_forbidden_as_editor_or_viewer(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test EDITOR or VIEWER role gets ForbiddenError when updating workspace name."""
+    editor_user = User(
+        id=uuid4(),
+        email="editor@taskhub.io",
+        full_name="Editor User",
+        hashed_password="hash",
+        role=UserRole.MEMBER,
+        is_active=True,
+    )
+    ws_id = uuid4()
+    now = datetime.now(UTC)
+    ws = Workspace(id=ws_id, name="Workspace Name", owner_id=sample_user.id, created_at=now)
+    editor_member = WorkspaceMember(
+        workspace_id=ws_id, user_id=editor_user.id, role=WorkspaceRole.EDITOR, joined_at=now
+    )
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(return_value=editor_member)
+
+    from app.core.exceptions import ForbiddenError
+    from app.schemas.workspace import WorkspaceUpdateRequest
+
+    dto = WorkspaceUpdateRequest(name="Unauthorized Name Change")
+    with pytest.raises(ForbiddenError) as exc_info:
+        await workspace_service.update_workspace(editor_user, ws_id, dto)
+
+    assert exc_info.value.code == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_update_workspace_not_found(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test update_workspace raises NotFoundError when workspace does not exist."""
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=None)
+
+    from app.core.exceptions import NotFoundError
+    from app.schemas.workspace import WorkspaceUpdateRequest
+
+    dto = WorkspaceUpdateRequest(name="Any Name")
+    with pytest.raises(NotFoundError) as exc_info:
+        await workspace_service.update_workspace(sample_user, uuid4(), dto)
+
+    assert exc_info.value.code == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_delete_workspace_success_as_owner(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test OWNER can delete workspace successfully."""
+    ws_id = uuid4()
+    now = datetime.now(UTC)
+    ws = Workspace(id=ws_id, name="To Delete", owner_id=sample_user.id, created_at=now)
+    owner_member = WorkspaceMember(
+        workspace_id=ws_id, user_id=sample_user.id, role=WorkspaceRole.OWNER, joined_at=now
+    )
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(return_value=owner_member)
+    workspace_service.workspace_repo.delete_by_id = AsyncMock(return_value=True)
+
+    await workspace_service.delete_workspace(sample_user, ws_id)
+
+    workspace_service.workspace_repo.delete_by_id.assert_called_once_with(ws_id)
+    workspace_service.db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_workspace_forbidden_for_non_owner(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test EDITOR role gets ForbiddenError when attempting to delete workspace."""
+    editor_user = User(
+        id=uuid4(),
+        email="editor@taskhub.io",
+        full_name="Editor",
+        hashed_password="hash",
+        role=UserRole.MEMBER,
+        is_active=True,
+    )
+    ws_id = uuid4()
+    now = datetime.now(UTC)
+    ws = Workspace(id=ws_id, name="WS", owner_id=sample_user.id, created_at=now)
+    editor_member = WorkspaceMember(
+        workspace_id=ws_id, user_id=editor_user.id, role=WorkspaceRole.EDITOR, joined_at=now
+    )
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(return_value=editor_member)
+
+    from app.core.exceptions import ForbiddenError
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await workspace_service.delete_workspace(editor_user, ws_id)
+
+    assert exc_info.value.code == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_delete_workspace_not_found(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test delete_workspace raises NotFoundError when workspace does not exist."""
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=None)
+
+    from app.core.exceptions import NotFoundError
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await workspace_service.delete_workspace(sample_user, uuid4())
+
+    assert exc_info.value.code == "NOT_FOUND"

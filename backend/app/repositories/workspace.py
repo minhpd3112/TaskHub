@@ -34,6 +34,14 @@ class WorkspaceRepository(BaseRepository[Workspace]):
         result = await self.db.execute(stmt)
         return [(row[0], row[1]) for row in result.all()]
 
+    async def update_workspace(self, workspace_id: UUID, name: str) -> Workspace | None:
+        """Update workspace name."""
+        workspace = await self.get_by_id(workspace_id)
+        if workspace:
+            workspace.name = name
+            await self.db.flush()
+        return workspace
+
 
 class WorkspaceMemberRepository(BaseRepository[WorkspaceMember]):
     """Repository handling database operations for WorkspaceMember entities."""

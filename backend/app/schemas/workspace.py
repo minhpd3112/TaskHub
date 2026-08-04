@@ -20,6 +20,20 @@ class WorkspaceCreateRequest(BaseModel):
         return stripped
 
 
+class WorkspaceUpdateRequest(BaseModel):
+    """Payload for updating a workspace."""
+
+    name: str = Field(..., min_length=1, max_length=100, description="Tên workspace mới")
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Tên workspace không được để trống hoặc chỉ chứa khoảng trắng.")
+        return stripped
+
+
 class WorkspaceResponse(BaseModel):
     """Schema for workspace response payload."""
 

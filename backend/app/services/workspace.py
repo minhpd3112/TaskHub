@@ -20,6 +20,7 @@ from app.schemas.workspace import (
     WorkspaceMemberDetailResponse,
     WorkspaceMemberResponse,
     WorkspaceResponse,
+    WorkspaceUpdateRequest,
 )
 
 
@@ -204,3 +205,47 @@ class WorkspaceService:
             )
             for member, user in members
         ]
+
+    async def update_workspace(
+        self, current_user: User, workspace_id: UUID, dto: WorkspaceUpdateRequest
+    ) -> WorkspaceResponse:
+        """Update workspace name."""
+        workspace = await self.workspace_repo.get_by_id(workspace_id)
+        if not workspace:
+            raise NotFoundError("Workspace not found.", code="NOT_FOUND")
+
+        if current_user.role != UserRole.ADMIN:
+            caller_member = await self.workspace_member_repo.get_member(
+                workspace_id, current_user.id
+            )
+            if not caller_member or caller_member.role != WorkspaceRole.OWNER:
+                raise ForbiddenError(
+                    "Only workspace OWNER or system ADMIN can update workspace.",
+                    code="FORBIDDEN",
+                )
+
+        updated_workspace = await self.workspace_repo.update_workspace(workspace_id, dto.name)
+        await self.db.commit()
+        if updated_workspace:
+            await self.db.refresh(updated_workspace)
+            return WorkspaceResponse.model_validate(updated_workspace)
+        raise NotFoundError("Workspace not found.", code="NOT_FOUND")
+
+    async def delete_workspace(self, current_user: User, workspace_id: UUID) -> None:
+        """Delete workspace and all associated entities (cascade)."""
+        workspace = await self.workspace_repo.get_by_id(workspace_id)
+        if not workspace:
+            raise NotFoundError("Workspace not found.", code="NOT_FOUND")
+
+        if current_user.role != UserRole.ADMIN:
+            caller_member = await self.workspace_member_repo.get_member(
+                workspace_id, current_user.id
+            )
+            if not caller_member or caller_member.role != WorkspaceRole.OWNER:
+                raise ForbiddenError(
+                    "Only workspace OWNER or system ADMIN can delete workspace.",
+                    code="FORBIDDEN",
+                )
+
+        await self.workspace_repo.delete_by_id(workspace_id)
+        await self.db.commit()

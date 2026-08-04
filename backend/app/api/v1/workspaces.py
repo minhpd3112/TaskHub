@@ -15,6 +15,7 @@ from app.schemas.workspace import (
     WorkspaceMemberDetailResponse,
     WorkspaceMemberResponse,
     WorkspaceResponse,
+    WorkspaceUpdateRequest,
 )
 from app.services.workspace import WorkspaceService
 
@@ -128,4 +129,38 @@ async def remove_member(
 ) -> Response:
     """Remove a member from the workspace."""
     await service.remove_member(current_user, workspace_id, user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch(
+    "/{workspace_id}",
+    response_model=SuccessResponse[WorkspaceResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Update workspace",
+    operation_id="capNhatWorkspace",
+)
+async def update_workspace(
+    workspace_id: UUID,
+    dto: WorkspaceUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    service: WorkspaceService = Depends(get_workspace_service),
+) -> SuccessResponse[WorkspaceResponse]:
+    """Update workspace name."""
+    workspace = await service.update_workspace(current_user, workspace_id, dto)
+    return SuccessResponse(data=workspace)
+
+
+@router.delete(
+    "/{workspace_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete workspace",
+    operation_id="xoaWorkspace",
+)
+async def delete_workspace(
+    workspace_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: WorkspaceService = Depends(get_workspace_service),
+) -> Response:
+    """Delete workspace."""
+    await service.delete_workspace(current_user, workspace_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
