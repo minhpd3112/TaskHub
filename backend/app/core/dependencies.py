@@ -8,11 +8,14 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.exceptions import UnauthorizedError
+from app.core.exceptions import ForbiddenError, NotFoundError, UnauthorizedError
 from app.core.redis import get_redis
 from app.core.security import decode_token
+from app.models.enums import UserRole, WorkspaceRole
 from app.models.user import User
+from app.models.workspace import WorkspaceMember
 from app.repositories.user import UserRepository
+from app.repositories.workspace import WorkspaceRepository
 
 http_bearer = HTTPBearer(auto_error=False)
 
@@ -58,23 +61,72 @@ async def get_current_user(
     return user
 
 
-def require_workspace_role(min_role: str) -> Callable[..., Any]:
+def require_workspace_role(min_role: WorkspaceRole | str) -> Callable[..., Any]:
     """Dependency factory for checking user workspace permissions.
 
-    Full implementation will be added in Phase 6 (Workspace & RBAC).
+    Roles rank: OWNER (3) > EDITOR (2) > VIEWER (1).
+    ADMIN role bypasses workspace role checks.
     """
+    target_role = WorkspaceRole(min_role) if isinstance(min_role, str) else min_role
 
-    async def dependency() -> Any:
-        raise NotImplementedError("RBAC dependency factory scaffold")
+    async def dependency(
+        workspace_id: UUID,
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> WorkspaceMember:
+        workspace_repo = WorkspaceRepository(db)
+
+        # 1. Admin bypass check
+        if current_user.role == UserRole.ADMIN:
+            workspace = await workspace_repo.get_by_id(workspace_id)
+            if not workspace:
+                raise NotFoundError("Workspace không tồn tại.", code="NOT_FOUND")
+            return WorkspaceMember(
+                workspace_id=workspace_id,
+                user_id=current_user.id,
+                role=WorkspaceRole.OWNER,
+            )
+
+        # 2. Check workspace existence
+        workspace = await workspace_repo.get_by_id(workspace_id)
+        if not workspace:
+            raise NotFoundError("Workspace không tồn tại.", code="NOT_FOUND")
+
+        # 3. Check workspace membership
+        member = await workspace_repo.get_member(workspace_id, current_user.id)
+        if not member:
+            raise ForbiddenError(
+                "Bạn không phải thành viên của workspace này.",
+                code="FORBIDDEN",
+            )
+
+        # 4. Check role hierarchy
+        role_hierarchy = {
+            WorkspaceRole.OWNER: 3,
+            WorkspaceRole.EDITOR: 2,
+            WorkspaceRole.VIEWER: 1,
+        }
+
+        user_rank = role_hierarchy.get(member.role, 0)
+        req_rank = role_hierarchy.get(target_role, 1)
+
+        if user_rank < req_rank:
+            raise ForbiddenError(
+                f"Yêu cầu quyền tối thiểu là {target_role.value}.",
+                code="FORBIDDEN",
+            )
+
+        return member
 
     return dependency
 
 
 def require_owner() -> Callable[..., Any]:
     """Shortcut dependency requiring OWNER role in workspace."""
-    return require_workspace_role("OWNER")
+    return require_workspace_role(WorkspaceRole.OWNER)
 
 
 def require_member() -> Callable[..., Any]:
     """Shortcut dependency requiring at least VIEWER role in workspace."""
-    return require_workspace_role("VIEWER")
+    return require_workspace_role(WorkspaceRole.VIEWER)
+
