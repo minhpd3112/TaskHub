@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import WorkspaceRole
@@ -16,6 +17,19 @@ class WorkspaceRepository(BaseRepository[Workspace]):
     async def create_workspace(self, name: str, owner_id: UUID) -> Workspace:
         """Create and persist a new workspace entity."""
         return await self.create(name=name, owner_id=owner_id)
+
+    async def get_workspaces_by_user_id(
+        self, user_id: UUID
+    ) -> list[tuple[Workspace, WorkspaceRole]]:
+        """Retrieve all workspaces where user is a member, alongside their role."""
+        stmt = (
+            select(Workspace, WorkspaceMember.role)
+            .join(WorkspaceMember, Workspace.id == WorkspaceMember.workspace_id)
+            .where(WorkspaceMember.user_id == user_id)
+            .order_by(Workspace.created_at.desc())
+        )
+        result = await self.db.execute(stmt)
+        return [(row[0], row[1]) for row in result.all()]
 
 
 class WorkspaceMemberRepository(BaseRepository[WorkspaceMember]):

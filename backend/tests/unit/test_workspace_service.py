@@ -77,3 +77,54 @@ async def test_create_workspace_success(
     assert response.id == workspace_id
     assert response.name == "Engineering Team"
     assert response.owner_id == sample_user.id
+
+
+@pytest.mark.asyncio
+async def test_get_user_workspaces_empty(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test get_user_workspaces returns empty list when user is not a member of any workspace."""
+    workspace_service.workspace_repo.get_workspaces_by_user_id = AsyncMock(return_value=[])
+
+    response = await workspace_service.get_user_workspaces(sample_user)
+
+    workspace_service.workspace_repo.get_workspaces_by_user_id.assert_called_once_with(
+        sample_user.id
+    )
+    assert response == []
+
+
+@pytest.mark.asyncio
+async def test_get_user_workspaces_success(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test get_user_workspaces returns workspace items with user roles (OWNER, EDITOR, VIEWER)."""
+    ws1_id = uuid4()
+    ws2_id = uuid4()
+    ws3_id = uuid4()
+    now = datetime.now(UTC)
+
+    ws1 = Workspace(id=ws1_id, name="WS Owner", owner_id=sample_user.id, created_at=now)
+    ws2 = Workspace(id=ws2_id, name="WS Editor", owner_id=uuid4(), created_at=now)
+    ws3 = Workspace(id=ws3_id, name="WS Viewer", owner_id=uuid4(), created_at=now)
+
+    mock_items = [
+        (ws1, WorkspaceRole.OWNER),
+        (ws2, WorkspaceRole.EDITOR),
+        (ws3, WorkspaceRole.VIEWER),
+    ]
+
+    workspace_service.workspace_repo.get_workspaces_by_user_id = AsyncMock(return_value=mock_items)
+
+    response = await workspace_service.get_user_workspaces(sample_user)
+
+    workspace_service.workspace_repo.get_workspaces_by_user_id.assert_called_once_with(
+        sample_user.id
+    )
+    assert len(response) == 3
+    assert response[0].id == ws1_id
+    assert response[0].role == WorkspaceRole.OWNER
+    assert response[1].id == ws2_id
+    assert response[1].role == WorkspaceRole.EDITOR
+    assert response[2].id == ws3_id
+    assert response[2].role == WorkspaceRole.VIEWER

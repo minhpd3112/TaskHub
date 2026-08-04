@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.models.enums import WorkspaceRole
+
 
 class WorkspaceCreateRequest(BaseModel):
     """Payload for creating a new workspace."""
@@ -26,6 +28,25 @@ class WorkspaceResponse(BaseModel):
     id: UUID
     name: str
     owner_id: UUID
+    created_at: datetime
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def default_created_at(cls, v: datetime | None) -> datetime:
+        if v is None:
+            return datetime.now(UTC)
+        return v
+
+
+class UserWorkspaceResponse(BaseModel):
+    """Response schema for a workspace item in current user's workspace list."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    owner_id: UUID
+    role: WorkspaceRole
     created_at: datetime
 
     @field_validator("created_at", mode="before")
