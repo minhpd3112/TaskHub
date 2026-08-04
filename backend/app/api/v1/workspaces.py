@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, status
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -6,8 +8,12 @@ from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.common import SuccessResponse
 from app.schemas.workspace import (
+    MemberInviteRequest,
+    MemberUpdateRoleRequest,
     UserWorkspaceResponse,
     WorkspaceCreateRequest,
+    WorkspaceMemberDetailResponse,
+    WorkspaceMemberResponse,
     WorkspaceResponse,
 )
 from app.services.workspace import WorkspaceService
@@ -52,3 +58,74 @@ async def list_my_workspaces(
     """Retrieve all workspaces where the authenticated user is a member."""
     workspaces = await service.get_user_workspaces(current_user)
     return SuccessResponse(data=workspaces)
+
+
+@router.post(
+    "/{workspace_id}/members",
+    response_model=SuccessResponse[WorkspaceMemberResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Invite member to workspace",
+    operation_id="themThanhVien",
+)
+async def invite_member(
+    workspace_id: UUID,
+    dto: MemberInviteRequest,
+    current_user: User = Depends(get_current_user),
+    service: WorkspaceService = Depends(get_workspace_service),
+) -> SuccessResponse[WorkspaceMemberResponse]:
+    """Invite a new member to the workspace."""
+    member = await service.invite_member(current_user, workspace_id, dto)
+    return SuccessResponse(data=member)
+
+
+@router.get(
+    "/{workspace_id}/members",
+    response_model=SuccessResponse[list[WorkspaceMemberDetailResponse]],
+    status_code=status.HTTP_200_OK,
+    summary="List workspace members",
+    operation_id="lietKeThanhVien",
+)
+async def list_workspace_members(
+    workspace_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: WorkspaceService = Depends(get_workspace_service),
+) -> SuccessResponse[list[WorkspaceMemberDetailResponse]]:
+    """Retrieve all members of a workspace."""
+    members = await service.list_workspace_members(current_user, workspace_id)
+    return SuccessResponse(data=members)
+
+
+@router.patch(
+    "/{workspace_id}/members/{user_id}",
+    response_model=SuccessResponse[WorkspaceMemberResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Update workspace member role",
+    operation_id="capNhatVaiTroThanhVien",
+)
+async def update_member_role(
+    workspace_id: UUID,
+    user_id: UUID,
+    dto: MemberUpdateRoleRequest,
+    current_user: User = Depends(get_current_user),
+    service: WorkspaceService = Depends(get_workspace_service),
+) -> SuccessResponse[WorkspaceMemberResponse]:
+    """Update role of an existing workspace member."""
+    member = await service.update_member_role(current_user, workspace_id, user_id, dto)
+    return SuccessResponse(data=member)
+
+
+@router.delete(
+    "/{workspace_id}/members/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove workspace member",
+    operation_id="xoaThanhVien",
+)
+async def remove_member(
+    workspace_id: UUID,
+    user_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: WorkspaceService = Depends(get_workspace_service),
+) -> Response:
+    """Remove a member from the workspace."""
+    await service.remove_member(current_user, workspace_id, user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -128,3 +128,210 @@ async def test_get_user_workspaces_success(
     assert response[1].role == WorkspaceRole.EDITOR
     assert response[2].id == ws3_id
     assert response[2].role == WorkspaceRole.VIEWER
+
+
+@pytest.mark.asyncio
+async def test_invite_member_success(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test invite_member creates new WorkspaceMember record successfully."""
+    ws_id = uuid4()
+    target_user_id = uuid4()
+    now = datetime.now(UTC)
+
+    ws = Workspace(id=ws_id, name="WS", owner_id=sample_user.id, created_at=now)
+    owner_member = WorkspaceMember(
+        workspace_id=ws_id, user_id=sample_user.id, role=WorkspaceRole.OWNER, joined_at=now
+    )
+    target_user = User(
+        id=target_user_id,
+        email="invitee@taskhub.io",
+        full_name="Invitee",
+        hashed_password="hash",
+        role=UserRole.MEMBER,
+        is_active=True,
+    )
+    new_member = WorkspaceMember(
+        workspace_id=ws_id, user_id=target_user_id, role=WorkspaceRole.EDITOR, joined_at=now
+    )
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(
+        side_effect=lambda w_id, u_id: owner_member if u_id == sample_user.id else None
+    )
+    workspace_service.user_repo.get_by_email = AsyncMock(return_value=target_user)
+    workspace_service.workspace_member_repo.add_member = AsyncMock(return_value=new_member)
+
+    from app.schemas.workspace import MemberInviteRequest
+
+    dto = MemberInviteRequest(email="invitee@taskhub.io", role=WorkspaceRole.EDITOR)
+    res = await workspace_service.invite_member(sample_user, ws_id, dto)
+
+    assert res.workspace_id == ws_id
+    assert res.user_id == target_user_id
+    assert res.role == WorkspaceRole.EDITOR
+
+
+@pytest.mark.asyncio
+async def test_invite_member_user_not_found(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test invite_member raises NotFoundError (code USER_NOT_FOUND)."""
+    ws_id = uuid4()
+    ws = Workspace(id=ws_id, name="WS", owner_id=sample_user.id, created_at=datetime.now(UTC))
+    owner_member = WorkspaceMember(
+        workspace_id=ws_id,
+        user_id=sample_user.id,
+        role=WorkspaceRole.OWNER,
+        joined_at=datetime.now(UTC),
+    )
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(return_value=owner_member)
+    workspace_service.user_repo.get_by_email = AsyncMock(return_value=None)
+
+    from app.core.exceptions import NotFoundError
+    from app.schemas.workspace import MemberInviteRequest
+
+    dto = MemberInviteRequest(email="nonexistent@taskhub.io")
+    with pytest.raises(NotFoundError) as exc_info:
+        await workspace_service.invite_member(sample_user, ws_id, dto)
+
+    assert exc_info.value.code == "USER_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_invite_member_already_member(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test invite_member raises ConflictError (code ALREADY_MEMBER)."""
+    ws_id = uuid4()
+    target_id = uuid4()
+    ws = Workspace(id=ws_id, name="WS", owner_id=sample_user.id, created_at=datetime.now(UTC))
+    owner_member = WorkspaceMember(
+        workspace_id=ws_id,
+        user_id=sample_user.id,
+        role=WorkspaceRole.OWNER,
+        joined_at=datetime.now(UTC),
+    )
+    target_user = User(
+        id=target_id,
+        email="member@taskhub.io",
+        full_name="Member",
+        hashed_password="hash",
+        role=UserRole.MEMBER,
+    )
+    existing_member = WorkspaceMember(
+        workspace_id=ws_id,
+        user_id=target_id,
+        role=WorkspaceRole.VIEWER,
+        joined_at=datetime.now(UTC),
+    )
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(
+        side_effect=lambda w_id, u_id: owner_member if u_id == sample_user.id else existing_member
+    )
+    workspace_service.user_repo.get_by_email = AsyncMock(return_value=target_user)
+
+    from app.core.exceptions import ConflictError
+    from app.schemas.workspace import MemberInviteRequest
+
+    dto = MemberInviteRequest(email="member@taskhub.io")
+    with pytest.raises(ConflictError) as exc_info:
+        await workspace_service.invite_member(sample_user, ws_id, dto)
+
+    assert exc_info.value.code == "ALREADY_MEMBER"
+
+
+@pytest.mark.asyncio
+async def test_update_member_role_demote_last_owner(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test updating role of last OWNER raises ValidationError (code CANNOT_DEMOTE_LAST_OWNER)."""
+    ws_id = uuid4()
+    ws = Workspace(id=ws_id, name="WS", owner_id=sample_user.id, created_at=datetime.now(UTC))
+    owner_member = WorkspaceMember(
+        workspace_id=ws_id,
+        user_id=sample_user.id,
+        role=WorkspaceRole.OWNER,
+        joined_at=datetime.now(UTC),
+    )
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(return_value=owner_member)
+    workspace_service.workspace_member_repo.count_owners = AsyncMock(return_value=1)
+
+    from app.core.exceptions import ValidationError
+    from app.schemas.workspace import MemberUpdateRoleRequest
+
+    dto = MemberUpdateRoleRequest(role=WorkspaceRole.EDITOR)
+    with pytest.raises(ValidationError) as exc_info:
+        await workspace_service.update_member_role(sample_user, ws_id, sample_user.id, dto)
+
+    assert exc_info.value.code == "CANNOT_DEMOTE_LAST_OWNER"
+
+
+@pytest.mark.asyncio
+async def test_remove_member_last_owner(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test removing last OWNER raises ValidationError (code CANNOT_REMOVE_OWNER)."""
+    ws_id = uuid4()
+    ws = Workspace(id=ws_id, name="WS", owner_id=sample_user.id, created_at=datetime.now(UTC))
+    owner_member = WorkspaceMember(
+        workspace_id=ws_id,
+        user_id=sample_user.id,
+        role=WorkspaceRole.OWNER,
+        joined_at=datetime.now(UTC),
+    )
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(return_value=owner_member)
+    workspace_service.workspace_member_repo.count_owners = AsyncMock(return_value=1)
+
+    from app.core.exceptions import ValidationError
+
+    with pytest.raises(ValidationError) as exc_info:
+        await workspace_service.remove_member(sample_user, ws_id, sample_user.id)
+
+    assert exc_info.value.code == "CANNOT_REMOVE_OWNER"
+
+
+@pytest.mark.asyncio
+async def test_remove_member_success_reassigns_tasks(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test remove_member reassigns tasks to workspace owner and deletes member record."""
+    ws_id = uuid4()
+    target_user_id = uuid4()
+    now = datetime.now(UTC)
+
+    ws = Workspace(id=ws_id, name="WS", owner_id=sample_user.id, created_at=now)
+    owner_member = WorkspaceMember(
+        workspace_id=ws_id, user_id=sample_user.id, role=WorkspaceRole.OWNER, joined_at=now
+    )
+    target_member = WorkspaceMember(
+        workspace_id=ws_id, user_id=target_user_id, role=WorkspaceRole.EDITOR, joined_at=now
+    )
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(
+        side_effect=lambda w_id, u_id: owner_member if u_id == sample_user.id else target_member
+    )
+    workspace_service.workspace_member_repo.reassign_workspace_member_tasks = AsyncMock(
+        return_value=2
+    )
+    workspace_service.workspace_member_repo.remove_member = AsyncMock()
+
+    await workspace_service.remove_member(sample_user, ws_id, target_user_id)
+
+    workspace_service.workspace_member_repo.reassign_workspace_member_tasks.assert_called_once_with(
+        workspace_id=ws_id,
+        member_id=target_user_id,
+        new_assignee_id=sample_user.id,
+    )
+    workspace_service.workspace_member_repo.remove_member.assert_called_once_with(
+        ws_id, target_user_id
+    )
+    workspace_service.db.commit.assert_called_once()

@@ -229,3 +229,228 @@ async def test_list_workspaces_data_isolation(async_client: AsyncClient) -> None
     data_b = res_b.json()["data"]
     assert len(data_b) == 1
     assert data_b[0]["name"] == "Workspace of B"
+
+
+@pytest.mark.asyncio
+async def test_workspace_member_full_lifecycle(async_client: AsyncClient) -> None:
+    """Integration test: Full lifecycle of member invite, list, update role, and remove."""
+    # 1. Register Owner
+    owner_email = f"ws_owner_{uuid4().hex[:8]}@taskhub.io"
+    password = "Password123!"
+    await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": owner_email, "full_name": "Workspace Owner", "password": password},
+    )
+    login_owner = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": owner_email, "password": password},
+    )
+    owner_headers = {"Authorization": f"Bearer {login_owner.json()['data']['access_token']}"}
+
+    # 2. Register Invitee
+    invitee_email = f"ws_member_{uuid4().hex[:8]}@taskhub.io"
+    reg_invitee = await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": invitee_email, "full_name": "Invitee Member", "password": password},
+    )
+    invitee_user_id = reg_invitee.json()["data"]["id"]
+
+    # 3. Create Workspace
+    ws_res = await async_client.post(
+        "/api/v1/workspaces",
+        json={"name": "Lifecycle Workspace"},
+        headers=owner_headers,
+    )
+    ws_id = ws_res.json()["data"]["id"]
+
+    # 4. Invite Invitee as EDITOR
+    invite_res = await async_client.post(
+        f"/api/v1/workspaces/{ws_id}/members",
+        json={"email": invitee_email, "role": "EDITOR"},
+        headers=owner_headers,
+    )
+    assert invite_res.status_code == 201
+    assert invite_res.json()["data"]["user_id"] == invitee_user_id
+    assert invite_res.json()["data"]["role"] == "EDITOR"
+
+    # 5. List members
+    list_res = await async_client.get(
+        f"/api/v1/workspaces/{ws_id}/members",
+        headers=owner_headers,
+    )
+    assert list_res.status_code == 200
+    members = list_res.json()["data"]
+    assert len(members) == 2
+    roles = {m["user_id"]: m["role"] for m in members}
+    assert roles[invitee_user_id] == "EDITOR"
+
+    # 6. Update role to VIEWER
+    update_res = await async_client.patch(
+        f"/api/v1/workspaces/{ws_id}/members/{invitee_user_id}",
+        json={"role": "VIEWER"},
+        headers=owner_headers,
+    )
+    assert update_res.status_code == 200
+    assert update_res.json()["data"]["role"] == "VIEWER"
+
+    # 7. Remove member
+    remove_res = await async_client.delete(
+        f"/api/v1/workspaces/{ws_id}/members/{invitee_user_id}",
+        headers=owner_headers,
+    )
+    assert remove_res.status_code == 204
+
+    # 8. List members again
+    list_res2 = await async_client.get(
+        f"/api/v1/workspaces/{ws_id}/members",
+        headers=owner_headers,
+    )
+    assert list_res2.status_code == 200
+    assert len(list_res2.json()["data"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_invite_member_errors(async_client: AsyncClient) -> None:
+    """Integration test: Invite non-existent email (404) and invite already member (409)."""
+    owner_email = f"ws_err_owner_{uuid4().hex[:8]}@taskhub.io"
+    password = "Password123!"
+    await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": owner_email, "full_name": "Error Owner", "password": password},
+    )
+    login_owner = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": owner_email, "password": password},
+    )
+    owner_headers = {"Authorization": f"Bearer {login_owner.json()['data']['access_token']}"}
+
+    ws_res = await async_client.post(
+        "/api/v1/workspaces",
+        json={"name": "Error Workspace"},
+        headers=owner_headers,
+    )
+    ws_id = ws_res.json()["data"]["id"]
+
+    # 1. Invite non-existent email -> 404
+    res1 = await async_client.post(
+        f"/api/v1/workspaces/{ws_id}/members",
+        json={"email": "nobody_exists_123456@taskhub.io"},
+        headers=owner_headers,
+    )
+    assert res1.status_code == 404
+    assert res1.json()["error"]["code"] == "USER_NOT_FOUND"
+
+    # 2. Invite self (owner is already member) -> 409
+    res2 = await async_client.post(
+        f"/api/v1/workspaces/{ws_id}/members",
+        json={"email": owner_email},
+        headers=owner_headers,
+    )
+    assert res2.status_code == 409
+    assert res2.json()["error"]["code"] == "ALREADY_MEMBER"
+
+
+@pytest.mark.asyncio
+async def test_member_permission_denied(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR/VIEWER cannot invite, update, or remove members (403)."""
+    owner_email = f"ws_perm_owner_{uuid4().hex[:8]}@taskhub.io"
+    member_email = f"ws_perm_editor_{uuid4().hex[:8]}@taskhub.io"
+    password = "Password123!"
+
+    # Register Owner
+    await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": owner_email, "full_name": "Owner", "password": password},
+    )
+    login_owner = await async_client.post(
+        "/api/v1/auth/login", json={"email": owner_email, "password": password}
+    )
+    owner_headers = {"Authorization": f"Bearer {login_owner.json()['data']['access_token']}"}
+
+    # Register Editor
+    reg_editor = await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": member_email, "full_name": "Editor", "password": password},
+    )
+    editor_id = reg_editor.json()["data"]["id"]
+    login_editor = await async_client.post(
+        "/api/v1/auth/login", json={"email": member_email, "password": password}
+    )
+    editor_headers = {"Authorization": f"Bearer {login_editor.json()['data']['access_token']}"}
+
+    # Create WS & invite Editor
+    ws_res = await async_client.post(
+        "/api/v1/workspaces", json={"name": "Perm Workspace"}, headers=owner_headers
+    )
+    ws_id = ws_res.json()["data"]["id"]
+    await async_client.post(
+        f"/api/v1/workspaces/{ws_id}/members",
+        json={"email": member_email, "role": "EDITOR"},
+        headers=owner_headers,
+    )
+
+    # Editor tries to invite -> 403
+    res_invite = await async_client.post(
+        f"/api/v1/workspaces/{ws_id}/members",
+        json={"email": "someone@taskhub.io"},
+        headers=editor_headers,
+    )
+    assert res_invite.status_code == 403
+    assert res_invite.json()["error"]["code"] == "FORBIDDEN"
+
+    # Editor tries to update role -> 403
+    res_update = await async_client.patch(
+        f"/api/v1/workspaces/{ws_id}/members/{editor_id}",
+        json={"role": "OWNER"},
+        headers=editor_headers,
+    )
+    assert res_update.status_code == 403
+    assert res_update.json()["error"]["code"] == "FORBIDDEN"
+
+    # Editor tries to remove member -> 403
+    res_delete = await async_client.delete(
+        f"/api/v1/workspaces/{ws_id}/members/{editor_id}",
+        headers=editor_headers,
+    )
+    assert res_delete.status_code == 403
+    assert res_delete.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_last_owner_protection(async_client: AsyncClient) -> None:
+    """Integration test: Demoting or removing the last OWNER returns 400."""
+    owner_email = f"ws_last_owner_{uuid4().hex[:8]}@taskhub.io"
+    password = "Password123!"
+
+    reg_res = await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": owner_email, "full_name": "Last Owner", "password": password},
+    )
+    owner_id = reg_res.json()["data"]["id"]
+
+    login_res = await async_client.post(
+        "/api/v1/auth/login", json={"email": owner_email, "password": password}
+    )
+    owner_headers = {"Authorization": f"Bearer {login_res.json()['data']['access_token']}"}
+
+    ws_res = await async_client.post(
+        "/api/v1/workspaces", json={"name": "Last Owner Workspace"}, headers=owner_headers
+    )
+    ws_id = ws_res.json()["data"]["id"]
+
+    # Demote last owner -> 400
+    demote_res = await async_client.patch(
+        f"/api/v1/workspaces/{ws_id}/members/{owner_id}",
+        json={"role": "EDITOR"},
+        headers=owner_headers,
+    )
+    assert demote_res.status_code == 400
+    assert demote_res.json()["error"]["code"] == "CANNOT_DEMOTE_LAST_OWNER"
+
+    # Remove last owner -> 400
+    remove_res = await async_client.delete(
+        f"/api/v1/workspaces/{ws_id}/members/{owner_id}",
+        headers=owner_headers,
+    )
+    assert remove_res.status_code == 400
+    assert remove_res.json()["error"]["code"] == "CANNOT_REMOVE_OWNER"
