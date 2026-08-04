@@ -17,6 +17,7 @@ from app.schemas.common import (
 )
 from app.schemas.project import ProjectCreateRequest, ProjectResponse
 from app.schemas.user import UserResponse
+from app.schemas.workspace import WorkspaceCreateRequest, WorkspaceResponse
 
 __all__ = [
     "PaginationMeta",
@@ -26,6 +27,8 @@ __all__ = [
     "ErrorBody",
     "ErrorResponse",
     "UserResponse",
+    "WorkspaceCreateRequest",
+    "WorkspaceResponse",
     "RegisterRequest",
     "LoginRequest",
     "RefreshTokenRequest",

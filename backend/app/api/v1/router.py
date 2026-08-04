@@ -11,3 +11,4 @@ router.include_router(auth_router, prefix="/auth", tags=["Auth"])
 router.include_router(users_router, prefix="/users", tags=["Users"])
 router.include_router(workspaces_router, prefix="/workspaces", tags=["Workspaces"])
 router.include_router(projects_router, prefix="/projects", tags=["Projects"])
+
