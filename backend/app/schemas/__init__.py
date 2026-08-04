@@ -16,6 +16,7 @@ from app.schemas.common import (
     SuccessResponse,
 )
 from app.schemas.project import ProjectCreateRequest, ProjectResponse
+from app.schemas.task import AssigneeResponse, TaskCreateRequest, TaskResponse
 from app.schemas.user import UserResponse
 from app.schemas.workspace import WorkspaceCreateRequest, WorkspaceResponse
 
@@ -36,4 +37,7 @@ __all__ = [
     "NewAccessTokenResponse",
     "ProjectCreateRequest",
     "ProjectResponse",
+    "TaskCreateRequest",
+    "TaskResponse",
+    "AssigneeResponse",
 ]
