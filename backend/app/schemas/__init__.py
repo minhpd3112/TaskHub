@@ -15,6 +15,7 @@ from app.schemas.common import (
     PaginationMeta,
     SuccessResponse,
 )
+from app.schemas.project import ProjectCreateRequest, ProjectResponse
 from app.schemas.user import UserResponse
 from app.schemas.workspace import WorkspaceCreateRequest, WorkspaceResponse
 
@@ -33,4 +34,6 @@ __all__ = [
     "RefreshTokenRequest",
     "TokenResponse",
     "NewAccessTokenResponse",
+    "ProjectCreateRequest",
+    "ProjectResponse",
 ]

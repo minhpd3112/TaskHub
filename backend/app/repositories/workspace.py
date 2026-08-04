@@ -42,6 +42,15 @@ class WorkspaceRepository(BaseRepository[Workspace]):
             await self.db.flush()
         return workspace
 
+    async def get_member(self, workspace_id: UUID, user_id: UUID) -> WorkspaceMember | None:
+        """Retrieve workspace membership for a specific user."""
+        stmt = select(WorkspaceMember).where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.user_id == user_id,
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
 
 class WorkspaceMemberRepository(BaseRepository[WorkspaceMember]):
     """Repository handling database operations for WorkspaceMember entities."""
