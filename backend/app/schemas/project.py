@@ -30,6 +30,32 @@ class ProjectCreateRequest(BaseModel):
         return stripped
 
 
+class ProjectUpdateRequest(BaseModel):
+    """Payload for updating an existing project."""
+
+    name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="Tên project mới (1-200 ký tự)",
+    )
+    description: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Mô tả project mới (tối đa 2000 ký tự)",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Project name cannot be empty or whitespace only.")
+        return stripped
+
+
 class ProjectResponse(BaseModel):
     """Response payload representing a project."""
 

@@ -4,11 +4,11 @@ from uuid import uuid4
 
 import pytest
 
-from app.core.exceptions import NotFoundError
-from app.models.enums import ProjectStatus
+from app.core.exceptions import ForbiddenError, NotFoundError
+from app.models.enums import ProjectStatus, WorkspaceRole
 from app.models.project import Project
-from app.models.workspace import Workspace
-from app.schemas.project import ProjectCreateRequest
+from app.models.workspace import Workspace, WorkspaceMember
+from app.schemas.project import ProjectCreateRequest, ProjectUpdateRequest
 from app.services.project import ProjectService
 
 
@@ -215,3 +215,190 @@ async def test_get_project_detail_idor_protection(project_service: ProjectServic
 
     assert exc_info.value.code == "NOT_FOUND"
     assert "Project không tồn tại" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_update_project_success_by_owner_and_editor(
+    project_service: ProjectService,
+) -> None:
+    """Test updating a project successfully by workspace OWNER or EDITOR."""
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+    existing_project = Project(
+        id=project_id,
+        workspace_id=workspace_id,
+        name="Old Name",
+        description="Old Desc",
+        status=ProjectStatus.ACTIVE,
+    )
+    updated_project = Project(
+        id=project_id,
+        workspace_id=workspace_id,
+        name="New Name",
+        description="New Desc",
+        status=ProjectStatus.ACTIVE,
+    )
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.EDITOR
+    )
+
+    project_service.project_repo.get_by_id = AsyncMock(return_value=existing_project)
+    project_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+    project_service.project_repo.update_project = AsyncMock(return_value=updated_project)
+
+    dto = ProjectUpdateRequest(name="New Name", description="New Desc")
+    result = await project_service.update_project(
+        project_id=project_id, dto=dto, current_user_id=user_id, is_admin=False
+    )
+
+    assert result.name == "New Name"
+    assert result.description == "New Desc"
+    project_service.project_repo.update_project.assert_called_once_with(
+        project_id, name="New Name", description="New Desc"
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_project_forbidden_for_viewer(
+    project_service: ProjectService,
+) -> None:
+    """Test VIEWER attempting to update a project raises ForbiddenError."""
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+    existing_project = Project(
+        id=project_id, workspace_id=workspace_id, name="Name", status=ProjectStatus.ACTIVE
+    )
+    viewer_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.VIEWER
+    )
+
+    project_service.project_repo.get_by_id = AsyncMock(return_value=existing_project)
+    project_service.workspace_repo.get_member = AsyncMock(return_value=viewer_member)
+
+    dto = ProjectUpdateRequest(name="Updated Name")
+    with pytest.raises(ForbiddenError) as exc_info:
+        await project_service.update_project(
+            project_id=project_id, dto=dto, current_user_id=user_id, is_admin=False
+        )
+
+    assert exc_info.value.code == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_update_project_not_found_for_non_member(
+    project_service: ProjectService,
+) -> None:
+    """Test non-member user attempting to update project raises NotFoundError (404 Guard)."""
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+    existing_project = Project(
+        id=project_id, workspace_id=workspace_id, name="Name", status=ProjectStatus.ACTIVE
+    )
+
+    project_service.project_repo.get_by_id = AsyncMock(return_value=existing_project)
+    project_service.workspace_repo.get_member = AsyncMock(return_value=None)
+
+    dto = ProjectUpdateRequest(name="Updated Name")
+    with pytest.raises(NotFoundError) as exc_info:
+        await project_service.update_project(
+            project_id=project_id, dto=dto, current_user_id=user_id, is_admin=False
+        )
+
+    assert exc_info.value.code == "NOT_FOUND"
+    assert "Project không tồn tại" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_update_project_name_validation() -> None:
+    """Test ProjectUpdateRequest validator raises ValidationError for empty or whitespace name."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ProjectUpdateRequest(name="   ")
+
+
+@pytest.mark.asyncio
+async def test_archive_project_success_preserves_tasks(
+    project_service: ProjectService,
+) -> None:
+    """Test archiving a project updates status to ARCHIVED while leaving tasks intact."""
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+    existing_project = Project(
+        id=project_id, workspace_id=workspace_id, name="Active Proj", status=ProjectStatus.ACTIVE
+    )
+    archived_project = Project(
+        id=project_id, workspace_id=workspace_id, name="Active Proj", status=ProjectStatus.ARCHIVED
+    )
+    owner_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.OWNER
+    )
+
+    project_service.project_repo.get_by_id = AsyncMock(return_value=existing_project)
+    project_service.workspace_repo.get_member = AsyncMock(return_value=owner_member)
+    project_service.project_repo.update_project = AsyncMock(return_value=archived_project)
+
+    result = await project_service.archive_project(
+        project_id=project_id, current_user_id=user_id, is_admin=False
+    )
+
+    assert result.status == ProjectStatus.ARCHIVED
+    project_service.project_repo.update_project.assert_called_once_with(
+        project_id, status=ProjectStatus.ARCHIVED
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_project_success(
+    project_service: ProjectService,
+) -> None:
+    """Test deleting a project successfully by OWNER or EDITOR."""
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+    existing_project = Project(
+        id=project_id, workspace_id=workspace_id, name="Proj to Delete", status=ProjectStatus.ACTIVE
+    )
+    owner_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.OWNER
+    )
+
+    project_service.project_repo.get_by_id = AsyncMock(return_value=existing_project)
+    project_service.workspace_repo.get_member = AsyncMock(return_value=owner_member)
+    project_service.project_repo.delete_project = AsyncMock(return_value=True)
+
+    await project_service.delete_project(
+        project_id=project_id, current_user_id=user_id, is_admin=False
+    )
+
+    project_service.project_repo.delete_project.assert_called_once_with(project_id)
+
+
+@pytest.mark.asyncio
+async def test_delete_project_forbidden_for_viewer(
+    project_service: ProjectService,
+) -> None:
+    """Test VIEWER attempting to delete project raises ForbiddenError."""
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+    existing_project = Project(
+        id=project_id, workspace_id=workspace_id, name="Proj", status=ProjectStatus.ACTIVE
+    )
+    viewer_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.VIEWER
+    )
+
+    project_service.project_repo.get_by_id = AsyncMock(return_value=existing_project)
+    project_service.workspace_repo.get_member = AsyncMock(return_value=viewer_member)
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await project_service.delete_project(
+            project_id=project_id, current_user_id=user_id, is_admin=False
+        )
+
+    assert exc_info.value.code == "FORBIDDEN"

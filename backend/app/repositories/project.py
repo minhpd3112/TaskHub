@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -84,3 +85,31 @@ class ProjectRepository(BaseRepository[Project]):
         if not row:
             return None
         return (row[0], int(row[1]))
+
+    async def update_project(
+        self,
+        project_id: UUID,
+        **kwargs: Any,
+    ) -> Project | None:
+        """Update fields of an existing project."""
+        project = await self.get_by_id(project_id)
+        if not project:
+            return None
+
+        for key, value in kwargs.items():
+            if hasattr(project, key):
+                setattr(project, key, value)
+
+        await self.db.commit()
+        await self.db.refresh(project)
+        return project
+
+    async def delete_project(self, project_id: UUID) -> bool:
+        """Delete a project by ID."""
+        project = await self.get_by_id(project_id)
+        if not project:
+            return False
+
+        await self.db.delete(project)
+        await self.db.commit()
+        return True

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.config import settings
 from app.models.enums import ProjectStatus, WorkspaceRole
 from app.models.project import Project
+from app.models.task import Task
 from app.models.workspace import Workspace, WorkspaceMember
 
 
@@ -350,3 +351,180 @@ async def test_get_project_api_non_member_404(async_client: AsyncClient) -> None
     )
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
+async def _create_task_in_db(
+    project_id: UUID,
+    user_id: UUID,
+    title: str = "Test Task",
+) -> Task:
+    """Helper to create a task in the database."""
+    engine = create_async_engine(settings.DATABASE_URL)
+    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with session_factory() as session:
+        task = Task(
+            project_id=project_id,
+            assignee_id=user_id,
+            created_by=user_id,
+            title=title,
+        )
+        session.add(task)
+        await session.commit()
+        task_id = task.id
+    await engine.dispose()
+    return Task(
+        id=task_id, project_id=project_id, assignee_id=user_id, created_by=user_id, title=title
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_project_api_success(async_client: AsyncClient) -> None:
+    """Integration test: PATCH /api/v1/projects/{project_id} updates project -> 200 OK."""
+    headers, user_id = await _create_test_user(async_client, prefix="upd_owner")
+    workspace = await _create_workspace_with_member(owner_id=user_id)
+    project = await _create_project_in_db(workspace.id, name="Original Name")
+
+    payload = {"name": "Updated Project Name", "description": "Updated Description"}
+    response = await async_client.patch(
+        f"/api/v1/projects/{project.id}",
+        json=payload,
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["id"] == str(project.id)
+    assert data["name"] == "Updated Project Name"
+    assert data["description"] == "Updated Description"
+
+
+@pytest.mark.asyncio
+async def test_update_project_api_forbidden_for_viewer(async_client: AsyncClient) -> None:
+    """Integration test: VIEWER attempting to update project -> 403 Forbidden."""
+    _, owner_id = await _create_test_user(async_client, prefix="upd_owner_v")
+    viewer_headers, viewer_id = await _create_test_user(async_client, prefix="upd_viewer")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=viewer_id, role=WorkspaceRole.VIEWER
+    )
+    project = await _create_project_in_db(workspace.id, name="Project V")
+
+    response = await async_client.patch(
+        f"/api/v1/projects/{project.id}",
+        json={"name": "Forbidden Change"},
+        headers=viewer_headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_update_project_api_non_member_404(async_client: AsyncClient) -> None:
+    """Integration test: Non-member updating project -> 404 Not Found (404 Guard)."""
+    _, owner_id = await _create_test_user(async_client, prefix="upd_owner_nm")
+    outsider_headers, _ = await _create_test_user(async_client, prefix="upd_outsider")
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+    project = await _create_project_in_db(workspace.id, name="Protected Proj")
+
+    response = await async_client.patch(
+        f"/api/v1/projects/{project.id}",
+        json={"name": "Outsider Change"},
+        headers=outsider_headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_update_project_api_validation_error(async_client: AsyncClient) -> None:
+    """Integration test: Updating project with empty/whitespace name -> 422 Unprocessable Entity."""
+    headers, user_id = await _create_test_user(async_client, prefix="upd_val")
+    workspace = await _create_workspace_with_member(owner_id=user_id)
+    project = await _create_project_in_db(workspace.id, name="Valid Proj")
+
+    response = await async_client.patch(
+        f"/api/v1/projects/{project.id}",
+        json={"name": "   "},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_archive_project_api_success_preserves_tasks(async_client: AsyncClient) -> None:
+    """Integration test: Archiving project sets status to ARCHIVED and preserves tasks."""
+    headers, user_id = await _create_test_user(async_client, prefix="arch_user")
+    workspace = await _create_workspace_with_member(owner_id=user_id)
+    project = await _create_project_in_db(workspace.id, name="Project to Archive")
+    await _create_task_in_db(project.id, user_id, title="Task in Archived Project")
+
+    # Call archive endpoint
+    res_archive = await async_client.patch(
+        f"/api/v1/projects/{project.id}/archive",
+        headers=headers,
+    )
+    assert res_archive.status_code == 200
+    assert res_archive.json()["data"]["status"] == "ARCHIVED"
+
+    # Verify project detail still works and task_count is preserved
+    res_detail = await async_client.get(
+        f"/api/v1/projects/{project.id}",
+        headers=headers,
+    )
+    assert res_detail.status_code == 200
+    detail_data = res_detail.json()["data"]
+    assert detail_data["status"] == "ARCHIVED"
+    assert detail_data["task_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_project_api_success(async_client: AsyncClient) -> None:
+    """Integration test: DELETE /api/v1/projects/{project_id} -> 204 No Content."""
+    headers, user_id = await _create_test_user(async_client, prefix="del_owner")
+    workspace = await _create_workspace_with_member(owner_id=user_id)
+    project = await _create_project_in_db(workspace.id, name="Project to Delete")
+    task = await _create_task_in_db(project.id, user_id, title="Task to CASCADE delete")
+
+    response = await async_client.delete(
+        f"/api/v1/projects/{project.id}",
+        headers=headers,
+    )
+
+    assert response.status_code == 204
+
+    # Verify CASCADE deletion in DB directly
+    from sqlalchemy import select
+
+    engine = create_async_engine(settings.DATABASE_URL)
+    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with session_factory() as session:
+        proj_stmt = select(Project).where(Project.id == project.id)
+        task_stmt = select(Task).where(Task.id == task.id)
+        db_proj = (await session.execute(proj_stmt)).scalar_one_or_none()
+        db_task = (await session.execute(task_stmt)).scalar_one_or_none()
+
+        assert db_proj is None
+        assert db_task is None
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_delete_project_api_forbidden_for_viewer(async_client: AsyncClient) -> None:
+    """Integration test: VIEWER attempting to delete project -> 403 Forbidden."""
+    _, owner_id = await _create_test_user(async_client, prefix="del_owner_v")
+    viewer_headers, viewer_id = await _create_test_user(async_client, prefix="del_viewer")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=viewer_id, role=WorkspaceRole.VIEWER
+    )
+    project = await _create_project_in_db(workspace.id, name="Project Protected From Viewer")
+
+    response = await async_client.delete(
+        f"/api/v1/projects/{project.id}",
+        headers=viewer_headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"

@@ -2,12 +2,12 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import NotFoundError
-from app.models.enums import ProjectStatus
+from app.core.exceptions import ForbiddenError, NotFoundError
+from app.models.enums import ProjectStatus, WorkspaceRole
 from app.models.project import Project
 from app.repositories.project import ProjectRepository
 from app.repositories.workspace import WorkspaceRepository
-from app.schemas.project import ProjectCreateRequest
+from app.schemas.project import ProjectCreateRequest, ProjectUpdateRequest
 
 
 class ProjectService:
@@ -22,6 +22,32 @@ class ProjectService:
         self.db = db
         self.project_repo = project_repo or ProjectRepository(db)
         self.workspace_repo = workspace_repo or WorkspaceRepository(db)
+
+    async def _get_project_with_access_check(
+        self,
+        project_id: UUID,
+        current_user_id: UUID,
+        is_admin: bool = False,
+    ) -> Project:
+        """Get project by ID and verify membership and write permission (EDITOR/OWNER/ADMIN).
+
+        Raises:
+            NotFoundError: If project does not exist or user is not a workspace member.
+            ForbiddenError: If member's role is VIEWER.
+        """
+        project = await self.project_repo.get_by_id(project_id)
+        if not project:
+            raise NotFoundError("Project không tồn tại", code="NOT_FOUND")
+
+        if not is_admin:
+            member = await self.workspace_repo.get_member(project.workspace_id, current_user_id)
+            if not member:
+                raise NotFoundError("Project không tồn tại", code="NOT_FOUND")
+
+            if member.role == WorkspaceRole.VIEWER:
+                raise ForbiddenError("Bạn không có quyền thực hiện thao tác này", code="FORBIDDEN")
+
+        return project
 
     async def create_project(
         self,
@@ -100,3 +126,60 @@ class ProjectService:
                 raise NotFoundError("Project không tồn tại", code="NOT_FOUND")
 
         return project, task_count
+
+    async def update_project(
+        self,
+        project_id: UUID,
+        dto: ProjectUpdateRequest,
+        current_user_id: UUID,
+        is_admin: bool = False,
+    ) -> Project:
+        """Update an existing project.
+
+        Raises:
+            NotFoundError: If project does not exist or user is not a workspace member.
+            ForbiddenError: If user is VIEWER.
+        """
+        project = await self._get_project_with_access_check(project_id, current_user_id, is_admin)
+        update_data = dto.model_dump(exclude_unset=True)
+        if not update_data:
+            return project
+
+        updated = await self.project_repo.update_project(project_id, **update_data)
+        return updated or project
+
+    async def archive_project(
+        self,
+        project_id: UUID,
+        current_user_id: UUID,
+        is_admin: bool = False,
+    ) -> Project:
+        """Toggle or set project status to ARCHIVED.
+
+        Raises:
+            NotFoundError: If project does not exist or user is not a workspace member.
+            ForbiddenError: If user is VIEWER.
+        """
+        project = await self._get_project_with_access_check(project_id, current_user_id, is_admin)
+        new_status = (
+            ProjectStatus.ARCHIVED
+            if project.status == ProjectStatus.ACTIVE
+            else ProjectStatus.ACTIVE
+        )
+        updated = await self.project_repo.update_project(project_id, status=new_status)
+        return updated or project
+
+    async def delete_project(
+        self,
+        project_id: UUID,
+        current_user_id: UUID,
+        is_admin: bool = False,
+    ) -> None:
+        """Delete a project and CASCADE remove all associated child entities.
+
+        Raises:
+            NotFoundError: If project does not exist or user is not a workspace member.
+            ForbiddenError: If user is VIEWER.
+        """
+        await self._get_project_with_access_check(project_id, current_user_id, is_admin)
+        await self.project_repo.delete_project(project_id)
