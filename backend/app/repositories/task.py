@@ -135,3 +135,11 @@ class TaskRepository(BaseRepository[Task]):
 
         await self.db.commit()
         return await self.get_task_detail(task_id)
+
+    async def update_status(self, task_id: UUID, status: TaskStatus) -> Task | None:
+        """Update task status and return with eager-loaded relationships."""
+        return await self.update_task(task_id, status=status)
+
+    async def update_priority(self, task_id: UUID, priority: TaskPriority) -> Task | None:
+        """Update task priority and return with eager-loaded relationships."""
+        return await self.update_task(task_id, priority=priority)

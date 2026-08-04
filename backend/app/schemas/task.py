@@ -73,6 +73,18 @@ class TaskUpdateRequest(BaseModel):
         return v
 
 
+class TaskStatusUpdateRequest(BaseModel):
+    """Schema cập nhật trạng thái task (doiTrangThaiCongViec)."""
+
+    status: TaskStatus
+
+
+class TaskPriorityUpdateRequest(BaseModel):
+    """Schema cập nhật mức độ ưu tiên task (doiUuTienCongViec)."""
+
+    priority: TaskPriority
+
+
 class AssigneeResponse(BaseModel):
     """Summarized response model for task assignee user."""
 

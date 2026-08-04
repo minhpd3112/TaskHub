@@ -11,7 +11,14 @@ from app.core.redis import get_redis
 from app.models.enums import TaskPriority, TaskStatus
 from app.models.user import User
 from app.schemas.common import PaginatedResponse, SuccessResponse
-from app.schemas.task import TaskCreateRequest, TaskDetailResponse, TaskResponse, TaskUpdateRequest
+from app.schemas.task import (
+    TaskCreateRequest,
+    TaskDetailResponse,
+    TaskPriorityUpdateRequest,
+    TaskResponse,
+    TaskStatusUpdateRequest,
+    TaskUpdateRequest,
+)
 from app.services.task import TaskService
 
 router = APIRouter()
@@ -136,5 +143,57 @@ async def update_task(
         task_id=task_id,
         current_user=current_user,
         data=body,
+    )
+    return SuccessResponse(data=TaskResponse.model_validate(task))
+
+
+@router.patch(
+    "/tasks/{task_id}/status",
+    response_model=SuccessResponse[TaskResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Chuyển trạng thái công việc",
+    description=(
+        "Cho phép người phụ trách (assignee), EDITOR hoặc OWNER "
+        "chuyển trạng thái công việc (TODO, IN_PROGRESS, IN_REVIEW, DONE)."
+    ),
+    operation_id="doiTrangThaiCongViec",
+)
+async def update_task_status(
+    task_id: UUID,
+    body: TaskStatusUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    service: TaskService = Depends(get_task_service),
+) -> SuccessResponse[TaskResponse]:
+    """Update task status."""
+    task = await service.update_task_status(
+        task_id=task_id,
+        status=body.status,
+        current_user=current_user,
+    )
+    return SuccessResponse(data=TaskResponse.model_validate(task))
+
+
+@router.patch(
+    "/tasks/{task_id}/priority",
+    response_model=SuccessResponse[TaskResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Chuyển mức độ ưu tiên công việc",
+    description=(
+        "Cho phép người phụ trách (assignee), EDITOR, OWNER hoặc ADMIN "
+        "chuyển mức độ ưu tiên công việc (LOW, MEDIUM, HIGH, URGENT)."
+    ),
+    operation_id="doiUuTienCongViec",
+)
+async def update_task_priority(
+    task_id: UUID,
+    body: TaskPriorityUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    service: TaskService = Depends(get_task_service),
+) -> SuccessResponse[TaskResponse]:
+    """Update task priority."""
+    task = await service.update_task_priority(
+        task_id=task_id,
+        priority=body.priority,
+        current_user=current_user,
     )
     return SuccessResponse(data=TaskResponse.model_validate(task))

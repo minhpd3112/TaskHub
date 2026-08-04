@@ -707,3 +707,476 @@ async def test_update_task_not_found_idor(task_service: TaskService) -> None:
         await task_service.update_task(task_id=task_id, current_user=stranger_user, data=dto)
 
     assert exc_info.value.code == "NOT_FOUND"
+
+
+# ============================================================================
+# TH-005.4: update_task_status & update_task_priority Unit Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_update_task_status_success_by_assignee(task_service: TaskService) -> None:
+    """Test assignee (EDITOR) updating task status successfully."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    assignee_user = User(id=uuid4(), email="assignee@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=assignee_user.id, role=WorkspaceRole.EDITOR
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=assignee_user.id,
+        status=TaskStatus.TODO,
+    )
+    updated_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=assignee_user.id,
+        status=TaskStatus.IN_PROGRESS,
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+    task_service.task_repo.update_status = AsyncMock(return_value=updated_task)
+
+    result = await task_service.update_task_status(
+        task_id=task_id,
+        status=TaskStatus.IN_PROGRESS,
+        current_user=assignee_user,
+    )
+
+    assert result.status == TaskStatus.IN_PROGRESS
+    task_service.task_repo.update_status.assert_called_once_with(task_id, TaskStatus.IN_PROGRESS)
+
+
+@pytest.mark.asyncio
+async def test_update_task_status_success_by_owner(task_service: TaskService) -> None:
+    """Test OWNER updating status of a task assigned to someone else successfully."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    owner_user = User(id=uuid4(), email="owner@example.com", role=UserRole.MEMBER)
+    other_user_id = uuid4()
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    owner_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=owner_user.id, role=WorkspaceRole.OWNER
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=other_user_id,
+        status=TaskStatus.TODO,
+    )
+    updated_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=other_user_id,
+        status=TaskStatus.DONE,
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=owner_member)
+    task_service.task_repo.update_status = AsyncMock(return_value=updated_task)
+
+    result = await task_service.update_task_status(
+        task_id=task_id,
+        status=TaskStatus.DONE,
+        current_user=owner_user,
+    )
+
+    assert result.status == TaskStatus.DONE
+
+
+@pytest.mark.asyncio
+async def test_update_task_status_forbidden_by_other_editor(task_service: TaskService) -> None:
+    """Test EDITOR attempting to update status of another user's task raises 403 FORBIDDEN."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    editor_user = User(id=uuid4(), email="editor@example.com", role=UserRole.MEMBER)
+    other_assignee_id = uuid4()
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=editor_user.id, role=WorkspaceRole.EDITOR
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=other_assignee_id,
+        status=TaskStatus.TODO,
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await task_service.update_task_status(
+            task_id=task_id,
+            status=TaskStatus.IN_PROGRESS,
+            current_user=editor_user,
+        )
+
+    assert exc_info.value.code == "FORBIDDEN"
+    assert "chuyển trạng thái" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_update_task_status_forbidden_by_viewer(task_service: TaskService) -> None:
+    """Test VIEWER attempting to update task status raises 403 FORBIDDEN."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    viewer_user = User(id=uuid4(), email="viewer@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    viewer_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=viewer_user.id, role=WorkspaceRole.VIEWER
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=uuid4(),
+        status=TaskStatus.TODO,
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=viewer_member)
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await task_service.update_task_status(
+            task_id=task_id,
+            status=TaskStatus.IN_PROGRESS,
+            current_user=viewer_user,
+        )
+
+    assert exc_info.value.code == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_update_task_status_archived_project(task_service: TaskService) -> None:
+    """Test updating task status in an archived project raises 400 PROJECT_ARCHIVED."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    assignee_user = User(id=uuid4(), email="assignee@example.com", role=UserRole.MEMBER)
+    archived_project = Project(
+        id=project_id, workspace_id=workspace_id, status=ProjectStatus.ARCHIVED
+    )
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=assignee_user.id, role=WorkspaceRole.EDITOR
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=archived_project,
+        assignee_id=assignee_user.id,
+        status=TaskStatus.TODO,
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+
+    with pytest.raises(ValidationError) as exc_info:
+        await task_service.update_task_status(
+            task_id=task_id,
+            status=TaskStatus.DONE,
+            current_user=assignee_user,
+        )
+
+    assert exc_info.value.code == "PROJECT_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_update_task_status_not_found_idor(task_service: TaskService) -> None:
+    """Test updating task status by non-workspace member raises 404 NOT_FOUND."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    outsider_user = User(id=uuid4(), email="outsider@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=uuid4(),
+        status=TaskStatus.TODO,
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=None)  # Not a member
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await task_service.update_task_status(
+            task_id=task_id,
+            status=TaskStatus.DONE,
+            current_user=outsider_user,
+        )
+
+    assert exc_info.value.code == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_update_task_priority_success(task_service: TaskService) -> None:
+    """Test updating task priority by an EDITOR who is the task assignee succeeds."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    editor_user = User(id=uuid4(), email="editor@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=editor_user.id, role=WorkspaceRole.EDITOR
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=editor_user.id,  # EDITOR is the assignee — required by new RBAC
+        priority=TaskPriority.LOW,
+    )
+    updated_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=editor_user.id,
+        priority=TaskPriority.URGENT,
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+    task_service.task_repo.update_priority = AsyncMock(return_value=updated_task)
+
+    result = await task_service.update_task_priority(
+        task_id=task_id,
+        priority=TaskPriority.URGENT,
+        current_user=editor_user,
+    )
+
+    assert result.priority == TaskPriority.URGENT
+    task_service.task_repo.update_priority.assert_called_once_with(task_id, TaskPriority.URGENT)
+
+
+@pytest.mark.asyncio
+async def test_update_task_priority_forbidden_by_viewer(task_service: TaskService) -> None:
+    """Test VIEWER attempting to update task priority raises 403 FORBIDDEN."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    viewer_user = User(id=uuid4(), email="viewer@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    viewer_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=viewer_user.id, role=WorkspaceRole.VIEWER
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=uuid4(),  # Viewer is not assignee
+        priority=TaskPriority.MEDIUM,
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=viewer_member)
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await task_service.update_task_priority(
+            task_id=task_id,
+            priority=TaskPriority.HIGH,
+            current_user=viewer_user,
+        )
+
+    assert exc_info.value.code == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_update_task_priority_forbidden_by_non_assignee_editor(
+    task_service: TaskService,
+) -> None:
+    """Test non-assignee EDITOR attempting to update task priority raises 403 FORBIDDEN."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    editor_user = User(id=uuid4(), email="editor@example.com", role=UserRole.MEMBER)
+    other_assignee_id = uuid4()
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=editor_user.id, role=WorkspaceRole.EDITOR
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=other_assignee_id,
+        priority=TaskPriority.LOW,
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await task_service.update_task_priority(
+            task_id=task_id,
+            priority=TaskPriority.HIGH,
+            current_user=editor_user,
+        )
+
+    assert exc_info.value.code == "FORBIDDEN"
+    assert "ưu tiên công việc" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_update_task_priority_archived_project(task_service: TaskService) -> None:
+    """Test updating task priority in an archived project raises 400 PROJECT_ARCHIVED."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    assignee_user = User(id=uuid4(), email="assignee@example.com", role=UserRole.MEMBER)
+    archived_project = Project(
+        id=project_id, workspace_id=workspace_id, status=ProjectStatus.ARCHIVED
+    )
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=assignee_user.id, role=WorkspaceRole.EDITOR
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=archived_project,
+        assignee_id=assignee_user.id,
+        priority=TaskPriority.LOW,
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+
+    with pytest.raises(ValidationError) as exc_info:
+        await task_service.update_task_priority(
+            task_id=task_id,
+            priority=TaskPriority.HIGH,
+            current_user=assignee_user,
+        )
+
+    assert exc_info.value.code == "PROJECT_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_update_task_priority_not_found_idor(task_service: TaskService) -> None:
+    """Test updating task priority by non-workspace member raises 404 NOT_FOUND."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    outsider_user = User(id=uuid4(), email="outsider@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=uuid4(),
+        priority=TaskPriority.LOW,
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=None)  # Not a member
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await task_service.update_task_priority(
+            task_id=task_id,
+            priority=TaskPriority.URGENT,
+            current_user=outsider_user,
+        )
+
+    assert exc_info.value.code == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_val",
+    [TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW, TaskStatus.DONE],
+)
+async def test_update_task_status_all_valid_enums(
+    task_service: TaskService, status_val: TaskStatus
+) -> None:
+    """Test all valid status transitions (TODO, IN_PROGRESS, IN_REVIEW, DONE)."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    assignee_user = User(id=uuid4(), email="assignee@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=assignee_user.id, role=WorkspaceRole.EDITOR
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=assignee_user.id,
+        status=TaskStatus.TODO,
+    )
+    updated_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=assignee_user.id,
+        status=status_val,
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+    task_service.task_repo.update_status = AsyncMock(return_value=updated_task)
+
+    res = await task_service.update_task_status(
+        task_id=task_id,
+        status=status_val,
+        current_user=assignee_user,
+    )
+    assert res.status == status_val
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "priority_val",
+    [TaskPriority.LOW, TaskPriority.MEDIUM, TaskPriority.HIGH, TaskPriority.URGENT],
+)
+async def test_update_task_priority_all_valid_enums(
+    task_service: TaskService, priority_val: TaskPriority
+) -> None:
+    """Test all valid priority transitions (LOW, MEDIUM, HIGH, URGENT)."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    assignee_user = User(id=uuid4(), email="assignee@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=assignee_user.id, role=WorkspaceRole.EDITOR
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=assignee_user.id,
+        priority=TaskPriority.LOW,
+    )
+    updated_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=assignee_user.id,
+        priority=priority_val,
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+    task_service.task_repo.update_priority = AsyncMock(return_value=updated_task)
+
+    res = await task_service.update_task_priority(
+        task_id=task_id,
+        priority=priority_val,
+        current_user=assignee_user,
+    )
+    assert res.priority == priority_val

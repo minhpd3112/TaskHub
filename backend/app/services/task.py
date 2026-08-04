@@ -304,3 +304,127 @@ class TaskService:
                 logger.warning(f"Failed to invalidate task list cache in Redis: {exc}")
 
         return updated_task
+
+    async def update_task_status(
+        self,
+        task_id: UUID,
+        status: TaskStatus,
+        current_user: User,
+    ) -> Task:
+        """Update task status with RBAC enforcement and cache invalidation.
+
+        Raises:
+            NotFoundError: If task does not exist or user is not a workspace member (404 Guard).
+            ForbiddenError: If EDITOR attempts to update status of task not assigned to them,
+                            or if VIEWER attempts to update status.
+            ValidationError: If project is ARCHIVED.
+        """
+        # 1. Fetch task detail
+        task = await self.task_repo.get_task_detail(task_id)
+        if not task:
+            raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+        # 2. Check existence & IDOR Guard & RBAC Permissions
+        if current_user.role != UserRole.ADMIN:
+            member = await self.workspace_repo.get_member(
+                task.project.workspace_id, current_user.id
+            )
+            if not member:
+                raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+            if member.role == WorkspaceRole.VIEWER:
+                raise ForbiddenError(
+                    "Viewer không có quyền cập nhật trạng thái công việc",
+                    code="FORBIDDEN",
+                )
+
+            if member.role == WorkspaceRole.EDITOR and task.assignee_id != current_user.id:
+                raise ForbiddenError(
+                    "Bạn không có quyền chuyển trạng thái công việc này",
+                    code="FORBIDDEN",
+                )
+
+        # 3. Check project status (400 PROJECT_ARCHIVED)
+        if task.project.status == ProjectStatus.ARCHIVED:
+            raise ValidationError(
+                "Không thể cập nhật công việc trong dự án đã bị archive",
+                code="PROJECT_ARCHIVED",
+            )
+
+        # 4. Perform status update in database
+        updated_task = await self.task_repo.update_status(task_id, status)
+        if not updated_task:
+            raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+        # 5. Invalidate Redis Cache for project tasks list
+        if self.redis:
+            try:
+                keys = await self.redis.keys(f"tasks:project:{task.project_id}:*")
+                if keys:
+                    await self.redis.delete(*keys)
+            except Exception as exc:
+                logger.warning(f"Failed to invalidate task list cache in Redis: {exc}")
+
+        return updated_task
+
+    async def update_task_priority(
+        self,
+        task_id: UUID,
+        priority: TaskPriority,
+        current_user: User,
+    ) -> Task:
+        """Update task priority with RBAC enforcement and cache invalidation.
+
+        Raises:
+            NotFoundError: If task does not exist or user is not a workspace member (404 Guard).
+            ForbiddenError: If VIEWER attempts to update priority (unconditional),
+                            or if EDITOR attempts to update priority of a task not assigned to them.
+            ValidationError: If project is ARCHIVED.
+        """
+        # 1. Fetch task detail
+        task = await self.task_repo.get_task_detail(task_id)
+        if not task:
+            raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+        # 2. Check existence & IDOR Guard & RBAC Permissions
+        if current_user.role != UserRole.ADMIN:
+            member = await self.workspace_repo.get_member(
+                task.project.workspace_id, current_user.id
+            )
+            if not member:
+                raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+            if member.role == WorkspaceRole.VIEWER:
+                raise ForbiddenError(
+                    "Viewer không có quyền cập nhật ưu tiên công việc",
+                    code="FORBIDDEN",
+                )
+
+            if member.role == WorkspaceRole.EDITOR and task.assignee_id != current_user.id:
+                raise ForbiddenError(
+                    "Bạn không có quyền chuyển mức độ ưu tiên công việc này",
+                    code="FORBIDDEN",
+                )
+
+        # 3. Check project status (400 PROJECT_ARCHIVED)
+        if task.project.status == ProjectStatus.ARCHIVED:
+            raise ValidationError(
+                "Không thể cập nhật công việc trong dự án đã bị archive",
+                code="PROJECT_ARCHIVED",
+            )
+
+        # 4. Perform priority update in database
+        updated_task = await self.task_repo.update_priority(task_id, priority)
+        if not updated_task:
+            raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+        # 5. Invalidate Redis Cache for project tasks list
+        if self.redis:
+            try:
+                keys = await self.redis.keys(f"tasks:project:{task.project_id}:*")
+                if keys:
+                    await self.redis.delete(*keys)
+            except Exception as exc:
+                logger.warning(f"Failed to invalidate task list cache in Redis: {exc}")
+
+        return updated_task

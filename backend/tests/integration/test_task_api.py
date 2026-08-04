@@ -727,3 +727,333 @@ async def test_update_task_api_validation_error(async_client: AsyncClient) -> No
         headers=owner_headers,
     )
     assert long_res.status_code == 422
+
+
+# ============================================================================
+# TH-005.4 Integration Tests: PATCH /tasks/{task_id}/status & priority
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_patch_task_status_api_success(async_client: AsyncClient) -> None:
+    """Integration test: Assignee (EDITOR) updates status via PATCH /status -> 200 OK."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="st_succ_owner")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="st_succ_editor")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id,
+        member_id=editor_id,
+        role=WorkspaceRole.EDITOR,
+    )
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Status API Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Status Update Task", "assignee_id": str(editor_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    # Editor (Assignee) changes status to IN_PROGRESS
+    res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}/status",
+        json={"status": "IN_PROGRESS"},
+        headers=editor_headers,
+    )
+    assert res.status_code == 200
+    data = res.json()["data"]
+    assert data["id"] == task_id
+    assert data["status"] == "IN_PROGRESS"
+
+    # Editor changes status to DONE
+    res_done = await async_client.patch(
+        f"/api/v1/tasks/{task_id}/status",
+        json={"status": "DONE"},
+        headers=editor_headers,
+    )
+    assert res_done.status_code == 200
+    assert res_done.json()["data"]["status"] == "DONE"
+
+
+@pytest.mark.asyncio
+async def test_patch_task_status_api_invalid_enum(async_client: AsyncClient) -> None:
+    """Integration test: Invalid status enum -> 422 UNPROCESSABLE_ENTITY."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="st_inv_owner")
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Invalid Status Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Invalid Status Task", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}/status",
+        json={"status": "INVALID_STATUS"},
+        headers=owner_headers,
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_patch_task_status_api_forbidden(async_client: AsyncClient) -> None:
+    """Integration test: Non-assignee EDITOR or VIEWER updating status -> 403 FORBIDDEN."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="st_forb_owner")
+    editor1_headers, editor1_id = await _create_test_user(async_client, prefix="st_forb_ed1")
+    editor2_headers, editor2_id = await _create_test_user(async_client, prefix="st_forb_ed2")
+    viewer_headers, viewer_id = await _create_test_user(async_client, prefix="st_forb_vw")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id,
+        member_id=editor1_id,
+        role=WorkspaceRole.EDITOR,
+    )
+
+    # Add editor2 and viewer as members of workspace
+    engine = create_async_engine(settings.DATABASE_URL)
+    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with session_factory() as session:
+        session.add(
+            WorkspaceMember(
+                workspace_id=workspace.id, user_id=editor2_id, role=WorkspaceRole.EDITOR
+            )
+        )
+        session.add(
+            WorkspaceMember(workspace_id=workspace.id, user_id=viewer_id, role=WorkspaceRole.VIEWER)
+        )
+        await session.commit()
+
+    await engine.dispose()
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Forbidden Status Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    # Task assigned to Editor 1
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Task Assigned to Ed1", "assignee_id": str(editor1_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    # Editor 2 attempts to change status of Editor 1's task -> 403
+    res_ed2 = await async_client.patch(
+        f"/api/v1/tasks/{task_id}/status",
+        json={"status": "IN_PROGRESS"},
+        headers=editor2_headers,
+    )
+    assert res_ed2.status_code == 403
+    assert res_ed2.json()["error"]["code"] == "FORBIDDEN"
+
+    # Viewer attempts to change status -> 403
+    res_vw = await async_client.patch(
+        f"/api/v1/tasks/{task_id}/status",
+        json={"status": "IN_PROGRESS"},
+        headers=viewer_headers,
+    )
+    assert res_vw.status_code == 403
+    assert res_vw.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_patch_task_priority_api_success(async_client: AsyncClient) -> None:
+    """Integration test: Priority update via PATCH /priority -> 200 OK."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="pr_succ_owner")
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Priority API Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Priority Task", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}/priority",
+        json={"priority": "URGENT"},
+        headers=owner_headers,
+    )
+    assert res.status_code == 200
+    data = res.json()["data"]
+    assert data["id"] == task_id
+    assert data["priority"] == "URGENT"
+
+
+@pytest.mark.asyncio
+async def test_patch_task_priority_api_invalid_enum(async_client: AsyncClient) -> None:
+    """Integration test: Invalid priority enum -> 422 UNPROCESSABLE_ENTITY."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="pr_inv_owner")
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Invalid Priority Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Invalid Priority Task", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}/priority",
+        json={"priority": "SUPER_HIGH"},
+        headers=owner_headers,
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_patch_task_priority_api_forbidden(async_client: AsyncClient) -> None:
+    """Integration test: Non-assignee EDITOR or VIEWER updating priority -> 403 FORBIDDEN."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="pr_forb_owner")
+    editor1_headers, editor1_id = await _create_test_user(async_client, prefix="pr_forb_ed1")
+    editor2_headers, editor2_id = await _create_test_user(async_client, prefix="pr_forb_ed2")
+    viewer_headers, viewer_id = await _create_test_user(async_client, prefix="pr_forb_vw")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id,
+        member_id=editor1_id,
+        role=WorkspaceRole.EDITOR,
+    )
+
+    engine = create_async_engine(settings.DATABASE_URL)
+    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with session_factory() as session:
+        session.add(
+            WorkspaceMember(
+                workspace_id=workspace.id, user_id=editor2_id, role=WorkspaceRole.EDITOR
+            )
+        )
+        session.add(
+            WorkspaceMember(workspace_id=workspace.id, user_id=viewer_id, role=WorkspaceRole.VIEWER)
+        )
+        await session.commit()
+    await engine.dispose()
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Forbidden Priority Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Priority Task Assigned to Ed1", "assignee_id": str(editor1_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    # Non-assignee Editor 2 attempts to change priority -> 403
+    res_ed2 = await async_client.patch(
+        f"/api/v1/tasks/{task_id}/priority",
+        json={"priority": "URGENT"},
+        headers=editor2_headers,
+    )
+    assert res_ed2.status_code == 403
+    assert res_ed2.json()["error"]["code"] == "FORBIDDEN"
+
+    # Viewer attempts to change priority -> 403
+    res_vw = await async_client.patch(
+        f"/api/v1/tasks/{task_id}/priority",
+        json={"priority": "HIGH"},
+        headers=viewer_headers,
+    )
+    assert res_vw.status_code == 403
+    assert res_vw.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_val", ["TODO", "IN_PROGRESS", "IN_REVIEW", "DONE"])
+async def test_patch_task_status_all_enums_api(async_client: AsyncClient, status_val: str) -> None:
+    """Integration test: All valid status enums via PATCH /status -> 200 OK."""
+    owner_headers, owner_id = await _create_test_user(
+        async_client, prefix=f"st_enum_{status_val.lower()}"
+    )
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": f"Status Enum Proj {status_val}"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Status Enum Task", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}/status",
+        json={"status": status_val},
+        headers=owner_headers,
+    )
+    assert res.status_code == 200
+    assert res.json()["data"]["status"] == status_val
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("priority_val", ["LOW", "MEDIUM", "HIGH", "URGENT"])
+async def test_patch_task_priority_all_enums_api(
+    async_client: AsyncClient, priority_val: str
+) -> None:
+    """Integration test: All valid priority enums via PATCH /priority -> 200 OK."""
+    owner_headers, owner_id = await _create_test_user(
+        async_client, prefix=f"pr_enum_{priority_val.lower()}"
+    )
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": f"Priority Enum Proj {priority_val}"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Priority Enum Task", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}/priority",
+        json={"priority": priority_val},
+        headers=owner_headers,
+    )
+    assert res.status_code == 200
+    assert res.json()["data"]["priority"] == priority_val
