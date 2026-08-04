@@ -1,10 +1,11 @@
 from datetime import date
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.comment import Comment
 from app.models.enums import TaskPriority, TaskStatus
 from app.models.task import Task
 from app.repositories.base import BaseRepository
@@ -50,3 +51,71 @@ class TaskRepository(BaseRepository[Task]):
         result = await self.db.execute(stmt)
         loaded_task = result.scalar_one()
         return loaded_task
+
+    async def list_tasks_by_project(
+        self,
+        project_id: UUID,
+        status: TaskStatus | None = None,
+        priority: TaskPriority | None = None,
+        assignee_id: UUID | None = None,
+        due_date: date | None = None,
+        editor_id: UUID | None = None,
+        page: int = 1,
+        limit: int = 20,
+    ) -> tuple[list[Task], int]:
+        """List tasks belonging to a project with filtering and pagination.
+
+        Returns a tuple of (list_of_tasks, total_count).
+        """
+        conditions = [Task.project_id == project_id]
+
+        if status is not None:
+            conditions.append(Task.status == status)
+
+        if priority is not None:
+            conditions.append(Task.priority == priority)
+
+        if assignee_id is not None:
+            conditions.append(Task.assignee_id == assignee_id)
+
+        if due_date is not None:
+            conditions.append(Task.due_date == due_date)
+
+        if editor_id is not None:
+            conditions.append(Task.assignee_id == editor_id)
+
+        # Count total items matching filters
+        count_stmt = select(func.count(Task.id)).where(*conditions)
+        total_result = await self.db.execute(count_stmt)
+        total: int = total_result.scalar_one()
+
+        # Query paginated tasks
+        offset = (page - 1) * limit
+        stmt = (
+            select(Task)
+            .options(selectinload(Task.assignee), selectinload(Task.labels))
+            .where(*conditions)
+            .order_by(Task.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await self.db.execute(stmt)
+        tasks = list(result.scalars().all())
+
+        return tasks, total
+
+    async def get_task_detail(self, task_id: UUID) -> Task | None:
+        """Get a single task with all detailed relationships loaded."""
+        stmt = (
+            select(Task)
+            .options(
+                selectinload(Task.project),
+                selectinload(Task.assignee),
+                selectinload(Task.creator),
+                selectinload(Task.labels),
+                selectinload(Task.comments).selectinload(Comment.author),
+            )
+            .where(Task.id == task_id)
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()

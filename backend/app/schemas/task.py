@@ -1,5 +1,4 @@
 from datetime import date, datetime
-from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -57,6 +56,47 @@ class AssigneeResponse(BaseModel):
     email: str
 
 
+class CreatorResponse(BaseModel):
+    """Summarized response model for task creator user."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    full_name: str
+    email: str
+
+
+class LabelResponse(BaseModel):
+    """Summarized response model for task label."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    color: str
+
+
+class CommentAuthorResponse(BaseModel):
+    """Summarized response model for comment author user."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    full_name: str
+    email: str
+
+
+class CommentResponse(BaseModel):
+    """Summarized response model for task comment."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    content: str
+    author: CommentAuthorResponse
+    created_at: datetime
+
+
 class TaskResponse(BaseModel):
     """Response payload representing a task."""
 
@@ -72,6 +112,28 @@ class TaskResponse(BaseModel):
     assignee_id: UUID
     assignee: AssigneeResponse | None = None
     created_by: UUID
-    labels: list[Any] = Field(default_factory=list)
+    labels: list[LabelResponse] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class TaskDetailResponse(BaseModel):
+    """Response payload representing detailed task information."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    project_id: UUID
+    title: str
+    description: str | None = None
+    status: TaskStatus
+    priority: TaskPriority
+    due_date: date | None = None
+    assignee_id: UUID
+    assignee: AssigneeResponse | None = None
+    created_by: UUID
+    creator: CreatorResponse | None = None
+    labels: list[LabelResponse] = Field(default_factory=list)
+    comments: list[CommentResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime | None = None

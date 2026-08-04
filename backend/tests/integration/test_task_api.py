@@ -263,3 +263,218 @@ async def test_create_task_api_archived_project_fails(async_client: AsyncClient)
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "PROJECT_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_api_success(async_client: AsyncClient) -> None:
+    """Integration test: List tasks with pagination and status/priority filters."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="list_owner")
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    # 1. Create project
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "List Tasks Project"},
+        headers=owner_headers,
+    )
+    assert proj_res.status_code == 201
+    project_id = proj_res.json()["data"]["id"]
+
+    # 2. Create 2 tasks
+    await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={
+            "title": "Task 1 TODO HIGH",
+            "status": "TODO",
+            "priority": "HIGH",
+            "assignee_id": str(owner_id),
+        },
+        headers=owner_headers,
+    )
+    await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={
+            "title": "Task 2 IN_PROGRESS LOW",
+            "status": "IN_PROGRESS",
+            "priority": "LOW",
+            "assignee_id": str(owner_id),
+        },
+        headers=owner_headers,
+    )
+
+    # 3. List all tasks
+    res = await async_client.get(
+        f"/api/v1/projects/{project_id}/tasks?page=1&limit=10",
+        headers=owner_headers,
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert "data" in body
+    assert "pagination" in body
+    assert body["pagination"]["total"] == 2
+    assert len(body["data"]) == 2
+
+    # 4. Filter by status=TODO
+    res_todo = await async_client.get(
+        f"/api/v1/projects/{project_id}/tasks?status=TODO",
+        headers=owner_headers,
+    )
+    assert res_todo.status_code == 200
+    todo_body = res_todo.json()
+    assert todo_body["pagination"]["total"] == 1
+    assert todo_body["data"][0]["status"] == "TODO"
+
+    # 5. Filter by priority=LOW
+    res_low = await async_client.get(
+        f"/api/v1/projects/{project_id}/tasks?priority=LOW",
+        headers=owner_headers,
+    )
+    assert res_low.status_code == 200
+    low_body = res_low.json()
+    assert low_body["pagination"]["total"] == 1
+    assert low_body["data"][0]["priority"] == "LOW"
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_api_editor_scoped(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR only lists tasks assigned to themselves."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="scoped_owner")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="scoped_editor")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id,
+        member_id=editor_id,
+        role=WorkspaceRole.EDITOR,
+    )
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Scoped Visibility Project"},
+        headers=owner_headers,
+    )
+    assert proj_res.status_code == 201
+    project_id = proj_res.json()["data"]["id"]
+
+    # Task assigned to Owner
+    await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Owner's Task", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+
+    # Task assigned to Editor
+    await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Editor's Task", "assignee_id": str(editor_id)},
+        headers=owner_headers,
+    )
+
+    # Editor requests tasks list
+    res = await async_client.get(
+        f"/api/v1/projects/{project_id}/tasks",
+        headers=editor_headers,
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["pagination"]["total"] == 1
+    assert body["data"][0]["title"] == "Editor's Task"
+    assert body["data"][0]["assignee_id"] == str(editor_id)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_api_non_member_404(async_client: AsyncClient) -> None:
+    """Integration test: Non-workspace member listing tasks -> 404 NOT_FOUND."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="nm_list_owner")
+    outsider_headers, _ = await _create_test_user(async_client, prefix="nm_list_outsider")
+
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Private List Project"},
+        headers=owner_headers,
+    )
+    assert proj_res.status_code == 201
+    project_id = proj_res.json()["data"]["id"]
+
+    res = await async_client.get(
+        f"/api/v1/projects/{project_id}/tasks",
+        headers=outsider_headers,
+    )
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_task_detail_api_success(async_client: AsyncClient) -> None:
+    """Integration test: GET /api/v1/tasks/{task_id} returns detailed task."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="detail_owner")
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Detail Task Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    task_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={
+            "title": "Task for Detail Test",
+            "description": "Comprehensive description",
+            "assignee_id": str(owner_id),
+        },
+        headers=owner_headers,
+    )
+    task_id = task_res.json()["data"]["id"]
+
+    res = await async_client.get(
+        f"/api/v1/tasks/{task_id}",
+        headers=owner_headers,
+    )
+    assert res.status_code == 200
+    data = res.json()["data"]
+    assert data["id"] == task_id
+    assert data["title"] == "Task for Detail Test"
+    assert data["description"] == "Comprehensive description"
+    assert data["assignee"]["id"] == str(owner_id)
+    assert data["creator"]["id"] == str(owner_id)
+    assert "labels" in data
+    assert "comments" in data
+
+
+@pytest.mark.asyncio
+async def test_get_task_detail_api_editor_other_task_404(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR accessing task assigned to someone else -> 404 NOT_FOUND."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="ed_det_owner")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="ed_det_editor")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id,
+        member_id=editor_id,
+        role=WorkspaceRole.EDITOR,
+    )
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Editor Detail Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    # Task assigned to Owner
+    task_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Owner Only Task", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = task_res.json()["data"]["id"]
+
+    # Editor tries to view Owner's task
+    res = await async_client.get(
+        f"/api/v1/tasks/{task_id}",
+        headers=editor_headers,
+    )
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "NOT_FOUND"

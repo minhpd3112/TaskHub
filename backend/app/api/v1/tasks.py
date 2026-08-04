@@ -1,15 +1,17 @@
+from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.redis import get_redis
+from app.models.enums import TaskPriority, TaskStatus
 from app.models.user import User
-from app.schemas.common import SuccessResponse
-from app.schemas.task import TaskCreateRequest, TaskResponse
+from app.schemas.common import PaginatedResponse, SuccessResponse
+from app.schemas.task import TaskCreateRequest, TaskDetailResponse, TaskResponse
 from app.services.task import TaskService
 
 router = APIRouter()
@@ -50,3 +52,63 @@ async def create_task(
         background_tasks=background_tasks,
     )
     return SuccessResponse(data=TaskResponse.model_validate(task))
+
+
+@router.get(
+    "/projects/{project_id}/tasks",
+    response_model=PaginatedResponse[TaskResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Xem danh sách công việc của dự án",
+    description=(
+        "Xem danh sách các công việc thuộc dự án với bộ lọc status, priority, "
+        "assignee, due_date và phân trang. "
+        "EDITOR chỉ nhìn thấy task được phân công cho mình."
+    ),
+    operation_id="lietKeCongViec",
+)
+async def list_tasks(
+    project_id: UUID,
+    status: TaskStatus | None = Query(default=None, description="Lọc theo trạng thái"),
+    priority: TaskPriority | None = Query(default=None, description="Lọc theo độ ưu tiên"),
+    assignee_id: UUID | None = Query(default=None, description="Lọc theo UUID người phụ trách"),
+    due_date: date | None = Query(default=None, description="Lọc theo hạn hoàn thành (YYYY-MM-DD)"),
+    page: int = Query(default=1, ge=1, description="Trang hiện tại"),
+    limit: int = Query(default=20, ge=1, le=100, description="Số bản ghi trên mỗi trang (1-100)"),
+    current_user: User = Depends(get_current_user),
+    service: TaskService = Depends(get_task_service),
+) -> PaginatedResponse[TaskResponse]:
+    """List tasks in a project with pagination, filtering, and RBAC scoping."""
+    return await service.list_tasks(
+        project_id=project_id,
+        current_user=current_user,
+        status=status,
+        priority=priority,
+        assignee_id=assignee_id,
+        due_date=due_date,
+        page=page,
+        limit=limit,
+    )
+
+
+@router.get(
+    "/tasks/{task_id}",
+    response_model=SuccessResponse[TaskDetailResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Xem chi tiết công việc",
+    description=(
+        "Xem thông tin chi tiết một công việc gồm người phụ trách, "
+        "người tạo, các nhãn và bình luận."
+    ),
+    operation_id="layCongViec",
+)
+async def get_task_detail(
+    task_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: TaskService = Depends(get_task_service),
+) -> SuccessResponse[TaskDetailResponse]:
+    """Get detailed task information."""
+    task = await service.get_task_detail(
+        task_id=task_id,
+        current_user=current_user,
+    )
+    return SuccessResponse(data=TaskDetailResponse.model_validate(task))
