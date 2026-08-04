@@ -783,10 +783,14 @@ async def test_delete_workspace_api_cascade_db_level(async_client: AsyncClient) 
 
         # WorkspaceMembers of workspace must be deleted
         members_in_db = (
-            await session.execute(
-                select(WorkspaceMember).where(WorkspaceMember.workspace_id == ws_id)
+            (
+                await session.execute(
+                    select(WorkspaceMember).where(WorkspaceMember.workspace_id == ws_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(members_in_db) == 0
 
         # Owner User entity MUST remain intact
@@ -795,5 +799,3 @@ async def test_delete_workspace_api_cascade_db_level(async_client: AsyncClient) 
         ).scalar_one_or_none()
         assert owner_in_db is not None
         assert owner_in_db.email == owner_email
-
-
