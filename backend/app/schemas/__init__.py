@@ -15,6 +15,7 @@ from app.schemas.common import (
     PaginationMeta,
     SuccessResponse,
 )
+from app.schemas.label import LabelCreateRequest, LabelResponse
 from app.schemas.project import ProjectCreateRequest, ProjectResponse
 from app.schemas.task import AssigneeResponse, TaskCreateRequest, TaskResponse
 from app.schemas.user import UserResponse
@@ -40,4 +41,6 @@ __all__ = [
     "TaskCreateRequest",
     "TaskResponse",
     "AssigneeResponse",
+    "LabelCreateRequest",
+    "LabelResponse",
 ]
