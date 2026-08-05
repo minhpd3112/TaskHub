@@ -39,3 +39,13 @@ class LabelResponse(BaseModel):
     color: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class LabelAssignResponse(BaseModel):
+    """Response when a label is assigned to a task."""
+
+    task_id: UUID
+    label_id: UUID
+    label: LabelResponse
+
+    model_config = ConfigDict(from_attributes=True)

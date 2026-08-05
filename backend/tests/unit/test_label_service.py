@@ -3,10 +3,11 @@ from uuid import uuid4
 
 import pytest
 
-from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from app.models.enums import WorkspaceRole
-from app.models.label import Label
+from app.models.label import Label, TaskLabel
 from app.models.project import Project
+from app.models.task import Task
 from app.models.workspace import WorkspaceMember
 from app.schemas.label import LabelCreateRequest
 from app.services.label import LabelService
@@ -54,8 +55,8 @@ async def test_create_label_success_owner(label_service: LabelService) -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_label_success_editor(label_service: LabelService) -> None:
-    """Test EDITOR creates a label successfully."""
+async def test_create_label_forbidden_editor(label_service: LabelService) -> None:
+    """Test EDITOR creating label raises ForbiddenError (403) per ADR-006."""
     project_id = uuid4()
     user_id = uuid4()
     workspace_id = uuid4()
@@ -64,17 +65,15 @@ async def test_create_label_success_editor(label_service: LabelService) -> None:
     sample_member = WorkspaceMember(
         workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.EDITOR
     )
-    created_label = Label(id=uuid4(), project_id=project_id, name="Feature", color="#3B82F6")
 
     label_service.project_repo.get_by_id = AsyncMock(return_value=sample_project)
     label_service.workspace_repo.get_member = AsyncMock(return_value=sample_member)
-    label_service.label_repo.get_by_project_and_name = AsyncMock(return_value=None)
-    label_service.label_repo.create_label = AsyncMock(return_value=created_label)
 
     dto = LabelCreateRequest(name="Feature", color="#3B82F6")
-    result = await label_service.create_label(project_id, dto, user_id, is_admin=False)
+    with pytest.raises(ForbiddenError) as exc_info:
+        await label_service.create_label(project_id, dto, user_id, is_admin=False)
 
-    assert result.name == "Feature"
+    assert exc_info.value.code == "FORBIDDEN"
 
 
 @pytest.mark.asyncio
@@ -183,3 +182,248 @@ async def test_list_labels_non_member_idor(label_service: LabelService) -> None:
         await label_service.list_labels(project_id, user_id, is_admin=False)
 
     assert exc_info.value.code == "NOT_FOUND"
+
+
+# === TH-006.2 UNIT TESTS ===
+
+
+@pytest.mark.asyncio
+async def test_assign_label_success(label_service: LabelService) -> None:
+    """Test assigning a label to a task successfully by OWNER."""
+    task_id = uuid4()
+    label_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+
+    sample_project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    sample_task = Task(id=task_id, project_id=project_id, title="Test Task")
+    sample_task.project = sample_project
+    sample_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.OWNER
+    )
+    sample_label = Label(id=label_id, project_id=project_id, name="Bug", color="#EF4444")
+    created_task_label = TaskLabel(task_id=task_id, label_id=label_id)
+
+    label_service.task_repo.get_task_detail = AsyncMock(return_value=sample_task)
+    label_service.workspace_repo.get_member = AsyncMock(return_value=sample_member)
+    label_service.label_repo.get_by_id = AsyncMock(return_value=sample_label)
+    label_service.label_repo.get_task_label = AsyncMock(return_value=None)
+    label_service.label_repo.assign_label_to_task = AsyncMock(return_value=created_task_label)
+
+    task_label, label = await label_service.assign_label(task_id, label_id, user_id, is_admin=False)
+
+    assert task_label.task_id == task_id
+    assert task_label.label_id == label_id
+    assert label.name == "Bug"
+    label_service.label_repo.assign_label_to_task.assert_called_once_with(task_id, label_id)
+
+
+@pytest.mark.asyncio
+async def test_assign_label_idempotent(label_service: LabelService) -> None:
+    """Test assigning an already assigned label returns existing task_label without error."""
+    task_id = uuid4()
+    label_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+
+    sample_project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    sample_task = Task(id=task_id, project_id=project_id, title="Test Task")
+    sample_task.project = sample_project
+    sample_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.OWNER
+    )
+
+    sample_label = Label(id=label_id, project_id=project_id, name="Bug", color="#EF4444")
+    existing_task_label = TaskLabel(task_id=task_id, label_id=label_id)
+
+    label_service.task_repo.get_task_detail = AsyncMock(return_value=sample_task)
+    label_service.workspace_repo.get_member = AsyncMock(return_value=sample_member)
+    label_service.label_repo.get_by_id = AsyncMock(return_value=sample_label)
+    label_service.label_repo.get_task_label = AsyncMock(return_value=existing_task_label)
+    label_service.label_repo.assign_label_to_task = AsyncMock()
+
+    task_label, label = await label_service.assign_label(task_id, label_id, user_id, is_admin=False)
+
+    assert task_label == existing_task_label
+    assert label == sample_label
+    label_service.label_repo.assign_label_to_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_assign_label_cross_project_raises_400(label_service: LabelService) -> None:
+    """Test assigning label from different project raises 400 LABEL_NOT_IN_PROJECT."""
+
+    task_id = uuid4()
+    label_id = uuid4()
+    project_id1 = uuid4()
+    project_id2 = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+
+    sample_project = Project(id=project_id1, workspace_id=workspace_id, name="Project Alpha")
+    sample_task = Task(id=task_id, project_id=project_id1, title="Test Task")
+    sample_task.project = sample_project
+    sample_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.OWNER
+    )
+    other_project_label = Label(id=label_id, project_id=project_id2, name="Other", color="#10B981")
+
+    label_service.task_repo.get_task_detail = AsyncMock(return_value=sample_task)
+    label_service.workspace_repo.get_member = AsyncMock(return_value=sample_member)
+    label_service.label_repo.get_by_id = AsyncMock(return_value=other_project_label)
+
+    with pytest.raises(ValidationError) as exc_info:
+        await label_service.assign_label(task_id, label_id, user_id, is_admin=False)
+
+    assert exc_info.value.code == "LABEL_NOT_IN_PROJECT"
+
+
+@pytest.mark.asyncio
+async def test_assign_label_viewer_raises_403(label_service: LabelService) -> None:
+    """Test VIEWER assigning label raises ForbiddenError."""
+    task_id = uuid4()
+    label_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+
+    sample_project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    sample_task = Task(id=task_id, project_id=project_id, title="Test Task")
+    sample_task.project = sample_project
+    sample_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.VIEWER
+    )
+
+    label_service.task_repo.get_task_detail = AsyncMock(return_value=sample_task)
+    label_service.workspace_repo.get_member = AsyncMock(return_value=sample_member)
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await label_service.assign_label(task_id, label_id, user_id, is_admin=False)
+
+    assert exc_info.value.code == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_assign_label_non_member_raises_404(label_service: LabelService) -> None:
+    """Test non-member assigning label raises NotFoundError (IDOR Guard)."""
+    task_id = uuid4()
+    label_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+
+    sample_project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    sample_task = Task(id=task_id, project_id=project_id, title="Test Task")
+    sample_task.project = sample_project
+
+    label_service.task_repo.get_task_detail = AsyncMock(return_value=sample_task)
+    label_service.workspace_repo.get_member = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await label_service.assign_label(task_id, label_id, user_id, is_admin=False)
+
+    assert exc_info.value.code == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_remove_label_success(label_service: LabelService) -> None:
+    """Test removing a label from a task successfully."""
+    task_id = uuid4()
+    label_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+
+    sample_project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    sample_task = Task(id=task_id, project_id=project_id, title="Test Task")
+    sample_task.project = sample_project
+    sample_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.OWNER
+    )
+    sample_label = Label(id=label_id, project_id=project_id, name="Bug", color="#EF4444")
+
+    label_service.task_repo.get_task_detail = AsyncMock(return_value=sample_task)
+    label_service.workspace_repo.get_member = AsyncMock(return_value=sample_member)
+    label_service.label_repo.get_by_id = AsyncMock(return_value=sample_label)
+    label_service.label_repo.remove_label_from_task = AsyncMock()
+
+    await label_service.remove_label(task_id, label_id, user_id, is_admin=False)
+
+    label_service.label_repo.remove_label_from_task.assert_called_once_with(task_id, label_id)
+
+
+@pytest.mark.asyncio
+async def test_remove_label_viewer_raises_403(label_service: LabelService) -> None:
+    """Test VIEWER removing label raises ForbiddenError."""
+    task_id = uuid4()
+    label_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+
+    sample_project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    sample_task = Task(id=task_id, project_id=project_id, title="Test Task")
+    sample_task.project = sample_project
+    sample_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.VIEWER
+    )
+
+    label_service.task_repo.get_task_detail = AsyncMock(return_value=sample_task)
+    label_service.workspace_repo.get_member = AsyncMock(return_value=sample_member)
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await label_service.remove_label(task_id, label_id, user_id, is_admin=False)
+
+    assert exc_info.value.code == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_assign_label_editor_raises_403(label_service: LabelService) -> None:
+    """Test EDITOR assigning label raises ForbiddenError per ADR-006."""
+    task_id = uuid4()
+    label_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+
+    sample_project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    sample_task = Task(id=task_id, project_id=project_id, title="Test Task")
+    sample_task.project = sample_project
+    sample_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.EDITOR
+    )
+
+    label_service.task_repo.get_task_detail = AsyncMock(return_value=sample_task)
+    label_service.workspace_repo.get_member = AsyncMock(return_value=sample_member)
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await label_service.assign_label(task_id, label_id, user_id, is_admin=False)
+
+    assert exc_info.value.code == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_remove_label_editor_raises_403(label_service: LabelService) -> None:
+    """Test EDITOR removing label raises ForbiddenError per ADR-006."""
+    task_id = uuid4()
+    label_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+
+    sample_project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    sample_task = Task(id=task_id, project_id=project_id, title="Test Task")
+    sample_task.project = sample_project
+    sample_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.EDITOR
+    )
+
+    label_service.task_repo.get_task_detail = AsyncMock(return_value=sample_task)
+    label_service.workspace_repo.get_member = AsyncMock(return_value=sample_member)
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await label_service.remove_label(task_id, label_id, user_id, is_admin=False)
+
+    assert exc_info.value.code == "FORBIDDEN"
