@@ -71,3 +71,27 @@ async def list_comments(
         page=page,
         limit=limit,
     )
+
+
+@router.delete(
+    "/{task_id}/comments/{comment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Xóa bình luận",
+    description=(
+        "Cho phép tác giả xóa bình luận của mình, OWNER/EDITOR workspace hoặc System ADMIN"
+        " xóa bất kỳ bình luận nào trong dự án."
+    ),
+    operation_id="xoaBinhLuan",
+)
+async def delete_comment(
+    task_id: UUID,
+    comment_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: CommentService = Depends(get_comment_service),
+) -> None:
+    """Delete a comment from a task."""
+    await service.delete_comment(
+        task_id=task_id,
+        comment_id=comment_id,
+        current_user=current_user,
+    )

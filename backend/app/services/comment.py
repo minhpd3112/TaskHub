@@ -3,9 +3,9 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.comment import Comment
-from app.models.enums import UserRole
+from app.models.enums import UserRole, WorkspaceRole
 from app.models.user import User
 from app.repositories.comment import CommentRepository
 from app.repositories.task import TaskRepository
@@ -96,3 +96,43 @@ class CommentService:
                 total_pages=total_pages,
             ),
         )
+
+    async def delete_comment(
+        self,
+        task_id: UUID,
+        comment_id: UUID,
+        current_user: User,
+    ) -> None:
+        """Delete a comment from a task.
+
+        Raises:
+            NotFoundError: If task/comment does not exist or user is not member.
+            ForbiddenError: If current user lacks permission to delete the comment.
+        """
+        task = await self.task_repo.get_task_detail(task_id)
+        if not task:
+            raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+        member = None
+        if current_user.role != UserRole.ADMIN:
+            member = await self.workspace_repo.get_member(
+                task.project.workspace_id, current_user.id
+            )
+            if not member:
+                raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+        comment = await self.comment_repo.get_comment_by_id(comment_id)
+        if not comment or comment.task_id != task_id:
+            raise NotFoundError("Comment không tồn tại", code="NOT_FOUND")
+
+        is_admin = current_user.role == UserRole.ADMIN
+        is_author = comment.author_id == current_user.id
+        is_owner_or_editor = member is not None and member.role in (
+            WorkspaceRole.OWNER,
+            WorkspaceRole.EDITOR,
+        )
+
+        if not (is_admin or is_author or is_owner_or_editor):
+            raise ForbiddenError("Bạn không có quyền xóa bình luận này.", code="FORBIDDEN")
+
+        await self.db.delete(comment)

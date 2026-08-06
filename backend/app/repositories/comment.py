@@ -55,3 +55,9 @@ class CommentRepository(BaseRepository[Comment]):
         comments = list(result.scalars().all())
 
         return comments, total
+
+    async def get_comment_by_id(self, comment_id: UUID) -> Comment | None:
+        """Retrieve a single comment by its ID."""
+        stmt = select(Comment).options(selectinload(Comment.author)).where(Comment.id == comment_id)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()

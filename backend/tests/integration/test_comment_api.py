@@ -489,3 +489,183 @@ async def test_list_comments_admin_bypass_success(async_client: AsyncClient) -> 
     assert res.status_code == 200
     assert res.json()["pagination"]["total"] == 1
     assert res.json()["data"][0]["content"] == "Owner comment for admin to view"
+
+
+# === TH-007.3 INTEGRATION TESTS ===
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_success_author(async_client: AsyncClient) -> None:
+    """Author (even VIEWER role) deletes their own comment -> 204 No Content."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="owner")
+    viewer_headers, viewer_id = await _create_test_user(async_client, prefix="viewer")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=viewer_id, role=WorkspaceRole.VIEWER
+    )
+    project = await _create_project_in_db(workspace_id=workspace.id)
+    task = await _create_task_in_db(
+        project_id=project.id, assignee_id=owner_id, created_by=owner_id
+    )
+
+    # Post comment as viewer
+    create_res = await async_client.post(
+        f"/api/v1/tasks/{task.id}/comments",
+        headers=viewer_headers,
+        json={"content": "Viewer comment to be deleted"},
+    )
+    assert create_res.status_code == 201
+    comment_id = create_res.json()["data"]["id"]
+
+    # Delete comment as viewer (author)
+    del_res = await async_client.delete(
+        f"/api/v1/tasks/{task.id}/comments/{comment_id}",
+        headers=viewer_headers,
+    )
+    assert del_res.status_code == 204
+    assert del_res.content == b""
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_success_owner(async_client: AsyncClient) -> None:
+    """Workspace OWNER deletes another user's comment -> 204 No Content."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="owner")
+    viewer_headers, viewer_id = await _create_test_user(async_client, prefix="viewer")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=viewer_id, role=WorkspaceRole.VIEWER
+    )
+    project = await _create_project_in_db(workspace_id=workspace.id)
+    task = await _create_task_in_db(
+        project_id=project.id, assignee_id=owner_id, created_by=owner_id
+    )
+
+    # Post comment as viewer
+    create_res = await async_client.post(
+        f"/api/v1/tasks/{task.id}/comments",
+        headers=viewer_headers,
+        json={"content": "Viewer comment deleted by owner"},
+    )
+    assert create_res.status_code == 201
+    comment_id = create_res.json()["data"]["id"]
+
+    # Delete comment as owner
+    del_res = await async_client.delete(
+        f"/api/v1/tasks/{task.id}/comments/{comment_id}",
+        headers=owner_headers,
+    )
+    assert del_res.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_success_editor(async_client: AsyncClient) -> None:
+    """Workspace EDITOR deletes another user's comment -> 204 No Content."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="owner")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="editor")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+    project = await _create_project_in_db(workspace_id=workspace.id)
+    task = await _create_task_in_db(
+        project_id=project.id, assignee_id=owner_id, created_by=owner_id
+    )
+
+    # Post comment as owner
+    create_res = await async_client.post(
+        f"/api/v1/tasks/{task.id}/comments",
+        headers=owner_headers,
+        json={"content": "Owner comment deleted by editor"},
+    )
+    assert create_res.status_code == 201
+    comment_id = create_res.json()["data"]["id"]
+
+    # Delete comment as editor
+    del_res = await async_client.delete(
+        f"/api/v1/tasks/{task.id}/comments/{comment_id}",
+        headers=editor_headers,
+    )
+    assert del_res.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_forbidden_viewer(async_client: AsyncClient) -> None:
+    """VIEWER attempting to delete another user's comment -> 403 FORBIDDEN."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="owner")
+    viewer_headers, viewer_id = await _create_test_user(async_client, prefix="viewer")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=viewer_id, role=WorkspaceRole.VIEWER
+    )
+    project = await _create_project_in_db(workspace_id=workspace.id)
+    task = await _create_task_in_db(
+        project_id=project.id, assignee_id=owner_id, created_by=owner_id
+    )
+
+    # Post comment as owner
+    create_res = await async_client.post(
+        f"/api/v1/tasks/{task.id}/comments",
+        headers=owner_headers,
+        json={"content": "Owner comment that viewer cannot delete"},
+    )
+    assert create_res.status_code == 201
+    comment_id = create_res.json()["data"]["id"]
+
+    # Viewer attempts to delete owner's comment
+    del_res = await async_client.delete(
+        f"/api/v1/tasks/{task.id}/comments/{comment_id}",
+        headers=viewer_headers,
+    )
+    assert del_res.status_code == 403
+    assert del_res.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_not_found_comment(async_client: AsyncClient) -> None:
+    """Deleting non-existent comment_id -> 404 NOT_FOUND."""
+    headers, owner_id = await _create_test_user(async_client, prefix="owner")
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+    project = await _create_project_in_db(workspace_id=workspace.id)
+    task = await _create_task_in_db(
+        project_id=project.id, assignee_id=owner_id, created_by=owner_id
+    )
+    random_comment_id = uuid4()
+
+    res = await async_client.delete(
+        f"/api/v1/tasks/{task.id}/comments/{random_comment_id}",
+        headers=headers,
+    )
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_idor_guard(async_client: AsyncClient) -> None:
+    """User not member of workspace attempting to delete comment -> 404 NOT_FOUND (IDOR Guard)."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="owner")
+    stranger_headers, _stranger_id = await _create_test_user(async_client, prefix="stranger")
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+    project = await _create_project_in_db(workspace_id=workspace.id)
+    task = await _create_task_in_db(
+        project_id=project.id, assignee_id=owner_id, created_by=owner_id
+    )
+
+    create_res = await async_client.post(
+        f"/api/v1/tasks/{task.id}/comments",
+        headers=owner_headers,
+        json={"content": "Owner comment"},
+    )
+    assert create_res.status_code == 201
+    comment_id = create_res.json()["data"]["id"]
+
+    res = await async_client.delete(
+        f"/api/v1/tasks/{task.id}/comments/{comment_id}",
+        headers=stranger_headers,
+    )
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_unauthenticated(async_client: AsyncClient) -> None:
+    """Deleting comment without authentication token -> 401 Unauthorized."""
+    task_id = uuid4()
+    comment_id = uuid4()
+    res = await async_client.delete(f"/api/v1/tasks/{task_id}/comments/{comment_id}")
+    assert res.status_code == 401
