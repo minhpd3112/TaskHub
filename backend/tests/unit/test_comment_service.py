@@ -226,11 +226,19 @@ async def test_list_comments_success(comment_service: CommentService) -> None:
 
     now = datetime.now(UTC)
     c1 = Comment(
-        id=uuid4(), task_id=task_id, author_id=user_id, content="Comment 1", created_at=now
+        id=uuid4(),
+        task_id=task_id,
+        author_id=user_id,
+        content="Comment 1",
+        created_at=now,
     )
     c1.author = user
     c2 = Comment(
-        id=uuid4(), task_id=task_id, author_id=user_id, content="Comment 2", created_at=now
+        id=uuid4(),
+        task_id=task_id,
+        author_id=user_id,
+        content="Comment 2",
+        created_at=now,
     )
     c2.author = user
 
@@ -329,7 +337,11 @@ async def test_list_comments_admin_bypass(comment_service: CommentService) -> No
 
     now = datetime.now(UTC)
     c1 = Comment(
-        id=uuid4(), task_id=task_id, author_id=uuid4(), content="Comment 1", created_at=now
+        id=uuid4(),
+        task_id=task_id,
+        author_id=uuid4(),
+        content="Comment 1",
+        created_at=now,
     )
     c1.author = User(id=c1.author_id, email="other@taskhub.io", full_name="Other User")
 
