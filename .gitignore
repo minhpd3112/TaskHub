@@ -78,3 +78,8 @@ logs/
 
 # Docs
 docs/
+
+# Qwen / AI agent files
+QWEN.md
+.qwen/
+*qwen*
