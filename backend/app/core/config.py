@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     APP_NAME: str = "TaskHub API"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
+    ENVIRONMENT: str = "development"
+    TESTING: bool = False
+    FRONTEND_URL: str = "http://localhost:3000"
 
     # Database — required, no default
     DATABASE_URL: str  # postgresql+asyncpg://user:pass@host:5432/db
@@ -24,11 +27,11 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # Email (Cloud SMTP)
-    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_HOST: str = "smtp.resend.com"
     SMTP_PORT: int = 587
-    SMTP_USER: str = ""
+    SMTP_USER: str = "resend"
     SMTP_PASSWORD: str = ""
-    EMAIL_FROM: str = "noreply@taskhub.io"
+    EMAIL_FROM: str = "onboarding@resend.dev"
 
     # Cache
     CACHE_TTL_TASKS: int = 300

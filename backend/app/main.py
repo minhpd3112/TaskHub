@@ -71,6 +71,10 @@ app = FastAPI(
             "name": "Comments",
             "description": "Task comment operations.",
         },
+        {
+            "name": "Notifications",
+            "description": "User notification settings operations.",
+        },
     ],
     lifespan=lifespan,
 )

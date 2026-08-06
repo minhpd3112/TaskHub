@@ -8,6 +8,7 @@ from fastapi import BackgroundTasks
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models.enums import ProjectStatus, TaskPriority, TaskStatus, UserRole, WorkspaceRole
 from app.models.task import Task
@@ -111,10 +112,13 @@ class TaskService:
 
         # 6. Dispatch async email notification for assignee
         if background_tasks and task.assignee and task.assignee.email:
+            task_link = f"{settings.FRONTEND_URL}/tasks/{task.id}"
             background_tasks.add_task(
                 self.email_service.send_task_assignment_notification,
-                assignee_email=task.assignee.email,
+                recipient_email=task.assignee.email,
                 task_title=task.title,
+                task_status=task.status.value,
+                task_link=task_link,
                 assigner_name=current_user.full_name,
             )
 
