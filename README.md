@@ -68,3 +68,25 @@ Tất cả tài khoản dùng mật khẩu chung: **`Password123!`**
 | `owner@taskhub.io` | Alice Owner | MEMBER | OWNER | Chủ sở hữu Workspace "TaskHub Engineering" & "Marketing Hub" |
 | `editor@taskhub.io` | Bob Editor | MEMBER | EDITOR | Thành viên thực thi task (Assignee của 4 task mẫu) |
 | `viewer@taskhub.io` | Carol Viewer | MEMBER | VIEWER | Thành viên xem/thảo luận trong Workspace |
+
+---
+
+## 5. Kiểm tra chất lượng code & Pytest Suite (Quality Gates)
+
+Chạy các lệnh sau từ thư mục `backend/` với môi trường `conda activate taskhub`:
+
+```bash
+cd backend
+
+# 1. Kiểm tra Lỗi Cú pháp & Format (Ruff Lint)
+ruff check .
+
+# 2. Kiểm tra Định dạng Code (Ruff Format)
+ruff format --check .
+
+# 3. Kiểm tra Strict Type Safety (Mypy)
+mypy app/
+
+# 4. Chạy Automated Unit & Integration Tests (262/262 Tests Passed 100%)
+pytest
+```

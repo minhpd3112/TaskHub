@@ -11,6 +11,7 @@ from app.models.enums import UserRole
 
 if TYPE_CHECKING:
     from app.models.comment import Comment
+    from app.models.notification import UserNotificationSetting
     from app.models.task import Task
     from app.models.workspace import Workspace, WorkspaceMember
 
@@ -71,4 +72,10 @@ class User(Base, UUIDMixin, TimestampMixin):
         "Comment",
         back_populates="author",
         lazy="select",
+    )
+    notification_setting: Mapped[UserNotificationSetting | None] = relationship(
+        "UserNotificationSetting",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
     )
