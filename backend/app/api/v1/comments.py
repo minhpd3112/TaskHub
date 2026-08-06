@@ -1,13 +1,13 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.comment import CommentCreateRequest, CommentResponse
-from app.schemas.common import SuccessResponse
+from app.schemas.common import PaginatedResponse, SuccessResponse
 from app.services.comment import CommentService
 
 router = APIRouter(prefix="/tasks", tags=["Comments"])
@@ -44,3 +44,30 @@ async def create_comment(
         content=dto.content,
     )
     return SuccessResponse(data=CommentResponse.model_validate(comment))
+
+
+@router.get(
+    "/{task_id}/comments",
+    response_model=PaginatedResponse[CommentResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Xem danh sách bình luận của công việc",
+    description=(
+        "Cho phép tất cả thành viên trong workspace (OWNER, EDITOR, VIEWER) và System ADMIN"
+        " xem danh sách bình luận của công việc (sắp xếp tăng dần theo thời gian)."
+    ),
+    operation_id="lietKeBinhLuan",
+)
+async def list_comments(
+    task_id: UUID,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    service: CommentService = Depends(get_comment_service),
+) -> PaginatedResponse[CommentResponse]:
+    """Get list of comments for a task."""
+    return await service.list_comments(
+        task_id=task_id,
+        current_user=current_user,
+        page=page,
+        limit=limit,
+    )

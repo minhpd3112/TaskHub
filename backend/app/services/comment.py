@@ -1,3 +1,4 @@
+from math import ceil
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,8 @@ from app.models.user import User
 from app.repositories.comment import CommentRepository
 from app.repositories.task import TaskRepository
 from app.repositories.workspace import WorkspaceRepository
+from app.schemas.comment import CommentResponse
+from app.schemas.common import PaginatedResponse, PaginationMeta
 
 
 class CommentService:
@@ -52,4 +55,44 @@ class CommentService:
             task_id=task_id,
             author_id=current_user.id,
             content=content,
+        )
+
+    async def list_comments(
+        self,
+        task_id: UUID,
+        current_user: User,
+        page: int = 1,
+        limit: int = 50,
+    ) -> PaginatedResponse[CommentResponse]:
+        """List comments for a task ordered by created_at ascending.
+
+        Raises:
+            NotFoundError: If task does not exist or current user is not a workspace member.
+        """
+        task = await self.task_repo.get_task_detail(task_id)
+        if not task:
+            raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+        if current_user.role != UserRole.ADMIN:
+            member = await self.workspace_repo.get_member(
+                task.project.workspace_id, current_user.id
+            )
+            if not member:
+                raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+        comments, total = await self.comment_repo.list_by_task(
+            task_id=task_id, page=page, limit=limit
+        )
+
+        total_pages = ceil(total / limit) if total > 0 else 0
+        comment_responses = [CommentResponse.model_validate(c) for c in comments]
+
+        return PaginatedResponse[CommentResponse](
+            data=comment_responses,
+            pagination=PaginationMeta(
+                page=page,
+                limit=limit,
+                total=total,
+                total_pages=total_pages,
+            ),
         )

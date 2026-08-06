@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -202,3 +203,144 @@ async def test_create_comment_non_member_idor_guard(comment_service: CommentServ
 
     assert exc_info.value.code == "NOT_FOUND"
     assert exc_info.value.message == "Task không tồn tại"
+
+
+# === LIST COMMENTS UNIT TESTS ===
+
+
+@pytest.mark.asyncio
+async def test_list_comments_success(comment_service: CommentService) -> None:
+    """Test listing comments successfully as workspace member."""
+    task_id = uuid4()
+    workspace_id = uuid4()
+    project_id = uuid4()
+    user_id = uuid4()
+
+    user = User(
+        id=user_id, email="member@taskhub.io", role=UserRole.MEMBER, full_name="Member User"
+    )
+    project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    task = Task(id=task_id, project_id=project_id, title="Test Task")
+    task.project = project
+    member = WorkspaceMember(workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.VIEWER)
+
+    now = datetime.now(UTC)
+    c1 = Comment(
+        id=uuid4(), task_id=task_id, author_id=user_id, content="Comment 1", created_at=now
+    )
+    c1.author = user
+    c2 = Comment(
+        id=uuid4(), task_id=task_id, author_id=user_id, content="Comment 2", created_at=now
+    )
+    c2.author = user
+
+    comment_service.task_repo.get_task_detail = AsyncMock(return_value=task)
+    comment_service.workspace_repo.get_member = AsyncMock(return_value=member)
+    comment_service.comment_repo.list_by_task = AsyncMock(return_value=([c1, c2], 2))
+
+    res = await comment_service.list_comments(task_id=task_id, current_user=user, page=1, limit=50)
+
+    assert len(res.data) == 2
+    assert res.pagination.page == 1
+    assert res.pagination.limit == 50
+    assert res.pagination.total == 2
+    assert res.pagination.total_pages == 1
+    assert res.data[0].content == "Comment 1"
+    assert res.data[1].content == "Comment 2"
+
+
+@pytest.mark.asyncio
+async def test_list_comments_empty(comment_service: CommentService) -> None:
+    """Test listing comments when task has no comments."""
+    task_id = uuid4()
+    workspace_id = uuid4()
+    project_id = uuid4()
+    user_id = uuid4()
+
+    user = User(
+        id=user_id, email="member@taskhub.io", role=UserRole.MEMBER, full_name="Member User"
+    )
+    project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    task = Task(id=task_id, project_id=project_id, title="Test Task")
+    task.project = project
+    member = WorkspaceMember(workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.OWNER)
+
+    comment_service.task_repo.get_task_detail = AsyncMock(return_value=task)
+    comment_service.workspace_repo.get_member = AsyncMock(return_value=member)
+    comment_service.comment_repo.list_by_task = AsyncMock(return_value=([], 0))
+
+    res = await comment_service.list_comments(task_id=task_id, current_user=user, page=1, limit=50)
+
+    assert res.data == []
+    assert res.pagination.total == 0
+    assert res.pagination.total_pages == 0
+
+
+@pytest.mark.asyncio
+async def test_list_comments_task_not_found(comment_service: CommentService) -> None:
+    """Test listing comments for non-existent task raises NotFoundError."""
+    task_id = uuid4()
+    user = User(id=uuid4(), email="user@taskhub.io", role=UserRole.MEMBER, full_name="User")
+
+    comment_service.task_repo.get_task_detail = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await comment_service.list_comments(task_id=task_id, current_user=user, page=1, limit=50)
+
+    assert exc_info.value.code == "NOT_FOUND"
+    assert exc_info.value.message == "Task không tồn tại"
+
+
+@pytest.mark.asyncio
+async def test_list_comments_non_member_idor_guard(comment_service: CommentService) -> None:
+    """Test non-member user listing comments raises NotFoundError (404 IDOR Guard)."""
+    task_id = uuid4()
+    workspace_id = uuid4()
+    project_id = uuid4()
+    user_id = uuid4()
+
+    user = User(id=user_id, email="stranger@taskhub.io", role=UserRole.MEMBER, full_name="Stranger")
+    project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    task = Task(id=task_id, project_id=project_id, title="Test Task")
+    task.project = project
+
+    comment_service.task_repo.get_task_detail = AsyncMock(return_value=task)
+    comment_service.workspace_repo.get_member = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await comment_service.list_comments(task_id=task_id, current_user=user, page=1, limit=50)
+
+    assert exc_info.value.code == "NOT_FOUND"
+    assert exc_info.value.message == "Task không tồn tại"
+
+
+@pytest.mark.asyncio
+async def test_list_comments_admin_bypass(comment_service: CommentService) -> None:
+    """Test System ADMIN listing comments without workspace membership."""
+    task_id = uuid4()
+    workspace_id = uuid4()
+    project_id = uuid4()
+    admin_id = uuid4()
+
+    admin_user = User(id=admin_id, email="admin@taskhub.io", role=UserRole.ADMIN, full_name="Admin")
+    project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    task = Task(id=task_id, project_id=project_id, title="Test Task")
+    task.project = project
+
+    now = datetime.now(UTC)
+    c1 = Comment(
+        id=uuid4(), task_id=task_id, author_id=uuid4(), content="Comment 1", created_at=now
+    )
+    c1.author = User(id=c1.author_id, email="other@taskhub.io", full_name="Other User")
+
+    comment_service.task_repo.get_task_detail = AsyncMock(return_value=task)
+    comment_service.workspace_repo.get_member = AsyncMock()
+    comment_service.comment_repo.list_by_task = AsyncMock(return_value=([c1], 1))
+
+    res = await comment_service.list_comments(
+        task_id=task_id, current_user=admin_user, page=1, limit=50
+    )
+
+    assert len(res.data) == 1
+    assert res.data[0].content == "Comment 1"
+    comment_service.workspace_repo.get_member.assert_not_called()
