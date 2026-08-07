@@ -153,15 +153,13 @@ async def remove_member(
     response_model=SuccessResponse[ProjectResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Tạo project mới trong workspace",
-    description=(
-        "Cho phép thành viên có vai trò EDITOR hoặc OWNER tạo một dự án mới trong Workspace."
-    ),
+    description=("Cho phép thành viên có vai trò OWNER tạo một dự án mới trong Workspace."),
     operation_id="taoDuAn",
 )
 async def create_project(
     workspace_id: UUID,
     dto: ProjectCreateRequest,
-    member: WorkspaceMember = Depends(require_workspace_role(WorkspaceRole.EDITOR)),
+    member: WorkspaceMember = Depends(require_workspace_role(WorkspaceRole.OWNER)),
     service: ProjectService = Depends(get_project_service),
 ) -> SuccessResponse[ProjectResponse]:
     """Create a new project in specified workspace."""

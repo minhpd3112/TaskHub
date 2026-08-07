@@ -109,10 +109,10 @@ async def test_create_project_as_owner_success(async_client: AsyncClient) -> Non
 
 
 @pytest.mark.asyncio
-async def test_create_project_as_editor_success(async_client: AsyncClient) -> None:
-    """Integration test: EDITOR creates a project -> 201 Created."""
-    owner_headers, owner_id = await _create_test_user(async_client, prefix="owner")
-    editor_headers, editor_id = await _create_test_user(async_client, prefix="editor")
+async def test_create_project_as_editor_forbidden(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR attempts to create a project -> 403 Forbidden."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="owner_ed")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="editor_ed")
 
     workspace = await _create_workspace_with_member(
         owner_id=owner_id,
@@ -128,11 +128,8 @@ async def test_create_project_as_editor_success(async_client: AsyncClient) -> No
         headers=editor_headers,
     )
 
-    assert response.status_code == 201
-    data = response.json()["data"]
-    assert data["name"] == "Editor Project"
-    assert data["description"] is None
-    assert data["status"] == "ACTIVE"
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
 
 
 @pytest.mark.asyncio
@@ -399,6 +396,26 @@ async def test_update_project_api_success(async_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_update_project_api_forbidden_for_editor(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR attempting to update project -> 403 Forbidden."""
+    _, owner_id = await _create_test_user(async_client, prefix="upd_owner_e")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="upd_editor")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+    project = await _create_project_in_db(workspace.id, name="Project E")
+
+    response = await async_client.patch(
+        f"/api/v1/projects/{project.id}",
+        json={"name": "Forbidden Change"},
+        headers=editor_headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
 async def test_update_project_api_forbidden_for_viewer(async_client: AsyncClient) -> None:
     """Integration test: VIEWER attempting to update project -> 403 Forbidden."""
     _, owner_id = await _create_test_user(async_client, prefix="upd_owner_v")
@@ -509,6 +526,44 @@ async def test_delete_project_api_success(async_client: AsyncClient) -> None:
         assert db_task is None
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_archive_project_api_forbidden_for_editor(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR attempting to archive project -> 403 Forbidden."""
+    _, owner_id = await _create_test_user(async_client, prefix="arch_owner_e")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="arch_editor")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+    project = await _create_project_in_db(workspace.id, name="Project Arch E")
+
+    response = await async_client.patch(
+        f"/api/v1/projects/{project.id}/archive",
+        headers=editor_headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_delete_project_api_forbidden_for_editor(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR attempting to delete project -> 403 Forbidden."""
+    _, owner_id = await _create_test_user(async_client, prefix="del_owner_e")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="del_editor")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+    project = await _create_project_in_db(workspace.id, name="Project Protected From Editor")
+
+    response = await async_client.delete(
+        f"/api/v1/projects/{project.id}",
+        headers=editor_headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
 
 
 @pytest.mark.asyncio

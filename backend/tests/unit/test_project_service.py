@@ -218,10 +218,10 @@ async def test_get_project_detail_idor_protection(project_service: ProjectServic
 
 
 @pytest.mark.asyncio
-async def test_update_project_success_by_owner_and_editor(
+async def test_update_project_success_by_owner(
     project_service: ProjectService,
 ) -> None:
-    """Test updating a project successfully by workspace OWNER or EDITOR."""
+    """Test updating a project successfully by workspace OWNER."""
     project_id = uuid4()
     workspace_id = uuid4()
     user_id = uuid4()
@@ -239,12 +239,12 @@ async def test_update_project_success_by_owner_and_editor(
         description="New Desc",
         status=ProjectStatus.ACTIVE,
     )
-    editor_member = WorkspaceMember(
-        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.EDITOR
+    owner_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.OWNER
     )
 
     project_service.project_repo.get_by_id = AsyncMock(return_value=existing_project)
-    project_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+    project_service.workspace_repo.get_member = AsyncMock(return_value=owner_member)
     project_service.project_repo.update_project = AsyncMock(return_value=updated_project)
 
     dto = ProjectUpdateRequest(name="New Name", description="New Desc")
@@ -257,6 +257,33 @@ async def test_update_project_success_by_owner_and_editor(
     project_service.project_repo.update_project.assert_called_once_with(
         project_id, name="New Name", description="New Desc"
     )
+
+
+@pytest.mark.asyncio
+async def test_update_project_forbidden_for_editor(
+    project_service: ProjectService,
+) -> None:
+    """Test EDITOR attempting to update a project raises ForbiddenError."""
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+    existing_project = Project(
+        id=project_id, workspace_id=workspace_id, name="Name", status=ProjectStatus.ACTIVE
+    )
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.EDITOR
+    )
+
+    project_service.project_repo.get_by_id = AsyncMock(return_value=existing_project)
+    project_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+
+    dto = ProjectUpdateRequest(name="Updated Name")
+    with pytest.raises(ForbiddenError) as exc_info:
+        await project_service.update_project(
+            project_id=project_id, dto=dto, current_user_id=user_id, is_admin=False
+        )
+
+    assert exc_info.value.code == "FORBIDDEN"
 
 
 @pytest.mark.asyncio
@@ -353,10 +380,36 @@ async def test_archive_project_success_preserves_tasks(
 
 
 @pytest.mark.asyncio
+async def test_archive_project_forbidden_for_editor(
+    project_service: ProjectService,
+) -> None:
+    """Test EDITOR attempting to archive project raises ForbiddenError."""
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+    existing_project = Project(
+        id=project_id, workspace_id=workspace_id, name="Active Proj", status=ProjectStatus.ACTIVE
+    )
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.EDITOR
+    )
+
+    project_service.project_repo.get_by_id = AsyncMock(return_value=existing_project)
+    project_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await project_service.archive_project(
+            project_id=project_id, current_user_id=user_id, is_admin=False
+        )
+
+    assert exc_info.value.code == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
 async def test_delete_project_success(
     project_service: ProjectService,
 ) -> None:
-    """Test deleting a project successfully by OWNER or EDITOR."""
+    """Test deleting a project successfully by OWNER."""
     project_id = uuid4()
     workspace_id = uuid4()
     user_id = uuid4()
@@ -376,6 +429,32 @@ async def test_delete_project_success(
     )
 
     project_service.project_repo.delete_project.assert_called_once_with(project_id)
+
+
+@pytest.mark.asyncio
+async def test_delete_project_forbidden_for_editor(
+    project_service: ProjectService,
+) -> None:
+    """Test EDITOR attempting to delete project raises ForbiddenError."""
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+    existing_project = Project(
+        id=project_id, workspace_id=workspace_id, name="Proj", status=ProjectStatus.ACTIVE
+    )
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.EDITOR
+    )
+
+    project_service.project_repo.get_by_id = AsyncMock(return_value=existing_project)
+    project_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await project_service.delete_project(
+            project_id=project_id, current_user_id=user_id, is_admin=False
+        )
+
+    assert exc_info.value.code == "FORBIDDEN"
 
 
 @pytest.mark.asyncio

@@ -29,11 +29,11 @@ class ProjectService:
         current_user_id: UUID,
         is_admin: bool = False,
     ) -> Project:
-        """Get project by ID and verify membership and write permission (EDITOR/OWNER/ADMIN).
+        """Get project by ID and verify membership and write permission (OWNER/ADMIN).
 
         Raises:
             NotFoundError: If project does not exist or user is not a workspace member.
-            ForbiddenError: If member's role is VIEWER.
+            ForbiddenError: If member's role is not OWNER.
         """
         project = await self.project_repo.get_by_id(project_id)
         if not project:
@@ -44,7 +44,7 @@ class ProjectService:
             if not member:
                 raise NotFoundError("Project không tồn tại", code="NOT_FOUND")
 
-            if member.role == WorkspaceRole.VIEWER:
+            if member.role != WorkspaceRole.OWNER:
                 raise ForbiddenError("Bạn không có quyền thực hiện thao tác này", code="FORBIDDEN")
 
         return project
