@@ -62,7 +62,7 @@ async def get_project_detail(
     response_model=SuccessResponse[ProjectResponse],
     status_code=status.HTTP_200_OK,
     summary="Cập nhật dự án",
-    description="Cho phép EDITOR hoặc OWNER cập nhật tên và mô tả dự án.",
+    description="Cho phép OWNER (hoặc System ADMIN) cập nhật tên và mô tả dự án.",
     operation_id="capNhatDuAn",
 )
 async def update_project(
@@ -86,7 +86,9 @@ async def update_project(
     response_model=SuccessResponse[ProjectResponse],
     status_code=status.HTTP_200_OK,
     summary="Thay đổi trạng thái/Archive dự án",
-    description="Cho phép EDITOR hoặc OWNER chuyển trạng thái dự án giữa ACTIVE và ARCHIVED.",
+    description=(
+        "Cho phép OWNER (hoặc System ADMIN) chuyển trạng thái dự án giữa ACTIVE và ARCHIVED."
+    ),
     operation_id="doiTrangThaiDuAn",
 )
 async def archive_project(
@@ -109,7 +111,8 @@ async def archive_project(
     response_class=Response,
     summary="Xóa dự án",
     description=(
-        "Cho phép EDITOR hoặc OWNER xóa dự án và CASCADE xóa toàn bộ task, label, comment con."
+        "Cho phép OWNER (hoặc System ADMIN) xóa dự án và CASCADE xóa toàn bộ task, label, "
+        "comment con."
     ),
     operation_id="xoaDuAn",
 )
