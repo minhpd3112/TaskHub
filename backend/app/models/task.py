@@ -4,7 +4,7 @@ import uuid
 from datetime import date
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, ForeignKey, Index, String, Text
+from sqlalchemy import Date, ForeignKey, Index, String, Text, desc
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -27,6 +27,7 @@ class Task(Base, UUIDMixin, TimestampMixin):
         Index("ix_tasks_project_status", "project_id", "status"),
         Index("ix_tasks_project_priority", "project_id", "priority"),
         Index("ix_tasks_project_assignee", "project_id", "assignee_id"),
+        Index("ix_tasks_project_created_at_desc", "project_id", desc("created_at")),
     )
 
     project_id: Mapped[uuid.UUID] = mapped_column(
