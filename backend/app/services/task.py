@@ -53,7 +53,7 @@ class TaskService:
 
         Raises:
             NotFoundError: If project does not exist or current user is not a workspace member.
-            ForbiddenError: If current user's role is VIEWER.
+            ForbiddenError: If current user's role is not OWNER (or system ADMIN).
             ValidationError: If project is ARCHIVED or assignee_id is not a workspace member.
         """
         # 1. Check project existence & status
@@ -73,9 +73,9 @@ class TaskService:
             if not member:
                 raise NotFoundError("Project không tồn tại", code="NOT_FOUND")
 
-            if member.role == WorkspaceRole.VIEWER:
+            if member.role != WorkspaceRole.OWNER:
                 raise ForbiddenError(
-                    "Bạn không có quyền tạo task trong project này",
+                    "Required role: OWNER",
                     code="FORBIDDEN",
                 )
 

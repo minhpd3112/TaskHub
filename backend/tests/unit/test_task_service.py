@@ -145,7 +145,101 @@ async def test_create_task_forbidden_for_viewer(task_service: TaskService) -> No
         )
 
     assert exc_info.value.code == "FORBIDDEN"
-    assert "quyền" in exc_info.value.message.lower()
+    assert "Required role: OWNER" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_create_task_forbidden_for_editor(task_service: TaskService) -> None:
+    """Test EDITOR attempting to create task raises ForbiddenError (403)."""
+    project_id = uuid4()
+    workspace_id = uuid4()
+    editor_user = User(
+        id=uuid4(),
+        email="editor@example.com",
+        full_name="Editor User",
+        role=UserRole.MEMBER,
+        is_active=True,
+    )
+    sample_project = Project(id=project_id, workspace_id=workspace_id, name="Test Project")
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=editor_user.id, role=WorkspaceRole.EDITOR
+    )
+
+    task_service.project_repo.get_by_id = AsyncMock(return_value=sample_project)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+
+    dto = TaskCreateRequest(title="Valid Title", assignee_id=uuid4())
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await task_service.create_task(
+            project_id=project_id,
+            current_user=editor_user,
+            dto=dto,
+        )
+
+    assert exc_info.value.code == "FORBIDDEN"
+    assert "Required role: OWNER" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_create_task_success_admin(task_service: TaskService) -> None:
+    """Test creating a task successfully by system ADMIN."""
+    project_id = uuid4()
+    workspace_id = uuid4()
+    admin_user = User(
+        id=uuid4(),
+        email="admin@example.com",
+        full_name="System Admin",
+        role=UserRole.ADMIN,
+        is_active=True,
+    )
+    assignee_user = User(
+        id=uuid4(),
+        email="assignee@example.com",
+        full_name="Assignee User",
+        role=UserRole.MEMBER,
+        is_active=True,
+    )
+    sample_project = Project(
+        id=project_id,
+        workspace_id=workspace_id,
+        name="Test Project",
+    )
+    assignee_member = WorkspaceMember(
+        workspace_id=workspace_id,
+        user_id=assignee_user.id,
+        role=WorkspaceRole.EDITOR,
+    )
+    created_task = Task(
+        id=uuid4(),
+        project_id=project_id,
+        created_by=admin_user.id,
+        assignee_id=assignee_user.id,
+        title="Admin Task",
+        status=TaskStatus.TODO,
+        priority=TaskPriority.HIGH,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        assignee=assignee_user,
+    )
+
+    task_service.project_repo.get_by_id = AsyncMock(return_value=sample_project)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=assignee_member)
+    task_service.task_repo.create_task = AsyncMock(return_value=created_task)
+
+    dto = TaskCreateRequest(
+        title="Admin Task",
+        assignee_id=assignee_user.id,
+    )
+
+    result = await task_service.create_task(
+        project_id=project_id,
+        current_user=admin_user,
+        dto=dto,
+    )
+
+    assert result.id == created_task.id
+    assert result.title == "Admin Task"
 
 
 @pytest.mark.asyncio
@@ -182,22 +276,22 @@ async def test_create_task_invalid_assignee_not_in_workspace(task_service: TaskS
     """Test assignee_id not belonging to workspace raises ValidationError (INVALID_ASSIGNEE)."""
     project_id = uuid4()
     workspace_id = uuid4()
-    editor_user = User(
+    owner_user = User(
         id=uuid4(),
-        email="editor@example.com",
-        full_name="Editor User",
+        email="owner@example.com",
+        full_name="Owner User",
         role=UserRole.MEMBER,
         is_active=True,
     )
     invalid_assignee_id = uuid4()
     sample_project = Project(id=project_id, workspace_id=workspace_id, name="Test Project")
-    editor_member = WorkspaceMember(
-        workspace_id=workspace_id, user_id=editor_user.id, role=WorkspaceRole.EDITOR
+    owner_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=owner_user.id, role=WorkspaceRole.OWNER
     )
 
     task_service.project_repo.get_by_id = AsyncMock(return_value=sample_project)
     task_service.workspace_repo.get_member = AsyncMock(
-        side_effect=lambda ws_id, u_id: editor_member if u_id == editor_user.id else None
+        side_effect=lambda ws_id, u_id: owner_member if u_id == owner_user.id else None
     )
 
     dto = TaskCreateRequest(title="Valid Title", assignee_id=invalid_assignee_id)
@@ -205,7 +299,7 @@ async def test_create_task_invalid_assignee_not_in_workspace(task_service: TaskS
     with pytest.raises(ValidationError) as exc_info:
         await task_service.create_task(
             project_id=project_id,
-            current_user=editor_user,
+            current_user=owner_user,
             dto=dto,
         )
 

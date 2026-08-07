@@ -38,7 +38,7 @@ def get_task_service(
     status_code=status.HTTP_201_CREATED,
     summary="Tạo công việc mới",
     description=(
-        "Cho phép EDITOR và OWNER của workspace tạo công việc mới trong dự án, "
+        "Cho phép thành viên có vai trò OWNER (hoặc System ADMIN) tạo công việc mới trong dự án, "
         "gán người phụ trách (bắt buộc phải là thành viên workspace) và "
         "thiết lập deadline/ưu tiên/mô tả."
     ),

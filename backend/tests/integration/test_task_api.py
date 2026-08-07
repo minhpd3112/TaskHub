@@ -142,6 +142,39 @@ async def test_create_task_api_as_viewer_forbidden(async_client: AsyncClient) ->
 
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "FORBIDDEN"
+    assert response.json()["error"]["message"] == "Required role: OWNER"
+
+
+@pytest.mark.asyncio
+async def test_create_task_api_as_editor_forbidden(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR attempts to create task -> 403 Forbidden."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="ed_tw_owner")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="ed_tw_editor")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id,
+        member_id=editor_id,
+        role=WorkspaceRole.EDITOR,
+    )
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Editor Task Proj"},
+        headers=owner_headers,
+    )
+    assert proj_res.status_code == 201
+    project_id = proj_res.json()["data"]["id"]
+
+    # EDITOR calling create_task
+    response = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Editor Task", "assignee_id": str(editor_id)},
+        headers=editor_headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+    assert response.json()["error"]["message"] == "Required role: OWNER"
 
 
 @pytest.mark.asyncio
