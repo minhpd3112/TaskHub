@@ -197,3 +197,19 @@ async def update_task_priority(
         current_user=current_user,
     )
     return SuccessResponse(data=TaskResponse.model_validate(task))
+
+
+@router.delete(
+    "/tasks/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="xoaCongViec",
+    summary="Xóa công việc",
+    description="Cho phép OWNER workspace hoặc system ADMIN xóa một công việc khỏi dự án.",
+)
+async def delete_task(
+    task_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: TaskService = Depends(get_task_service),
+) -> None:
+    """Delete a task from project (OWNER or ADMIN only)."""
+    await service.delete_task(task_id=task_id, current_user=current_user)

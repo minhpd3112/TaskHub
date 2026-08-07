@@ -1180,3 +1180,158 @@ async def test_update_task_priority_all_valid_enums(
         current_user=assignee_user,
     )
     assert res.priority == priority_val
+
+
+# ============================================================================
+# TH-005.5: delete_task Unit Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_delete_task_success_owner(task_service: TaskService) -> None:
+    """Test OWNER deleting task successfully with cache invalidation."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    owner_user = User(id=uuid4(), email="owner@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    owner_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=owner_user.id, role=WorkspaceRole.OWNER
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        title="Task to Delete",
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=owner_member)
+    mock_redis = AsyncMock()
+    mock_redis.keys = AsyncMock(return_value=[b"tasks:project:key1"])
+    task_service.redis = mock_redis
+
+    await task_service.delete_task(task_id=task_id, current_user=owner_user)
+
+    task_service.db.delete.assert_called_once_with(existing_task)
+    task_service.db.commit.assert_called_once()
+    mock_redis.delete.assert_called_once_with(b"tasks:project:key1")
+
+
+@pytest.mark.asyncio
+async def test_delete_task_success_admin(task_service: TaskService) -> None:
+    """Test system ADMIN deleting task successfully without workspace membership check."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    admin_user = User(id=uuid4(), email="admin@example.com", role=UserRole.ADMIN)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        title="Admin Task to Delete",
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+
+    await task_service.delete_task(task_id=task_id, current_user=admin_user)
+
+    task_service.db.delete.assert_called_once_with(existing_task)
+    task_service.db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_task_forbidden_for_editor(task_service: TaskService) -> None:
+    """Test EDITOR attempting to delete task raises 403 FORBIDDEN."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    editor_user = User(id=uuid4(), email="editor@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=editor_user.id, role=WorkspaceRole.EDITOR
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        assignee_id=editor_user.id,
+        title="Editor Assigned Task",
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await task_service.delete_task(task_id=task_id, current_user=editor_user)
+
+    assert exc_info.value.code == "FORBIDDEN"
+    assert "Required role: OWNER" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_delete_task_forbidden_for_viewer(task_service: TaskService) -> None:
+    """Test VIEWER attempting to delete task raises 403 FORBIDDEN."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    viewer_user = User(id=uuid4(), email="viewer@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    viewer_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=viewer_user.id, role=WorkspaceRole.VIEWER
+    )
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        title="Viewer Accessible Task",
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=viewer_member)
+
+    with pytest.raises(ForbiddenError) as exc_info:
+        await task_service.delete_task(task_id=task_id, current_user=viewer_user)
+
+    assert exc_info.value.code == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_delete_task_not_found(task_service: TaskService) -> None:
+    """Test deleting non-existent task raises 404 NOT_FOUND."""
+    random_task_id = uuid4()
+    owner_user = User(id=uuid4(), email="owner@example.com", role=UserRole.MEMBER)
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await task_service.delete_task(task_id=random_task_id, current_user=owner_user)
+
+    assert exc_info.value.code == "NOT_FOUND"
+    assert "Task không tồn tại" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_delete_task_not_found_idor(task_service: TaskService) -> None:
+    """Test user from another workspace deleting task raises 404 NOT_FOUND (IDOR Guard)."""
+    task_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    outsider_user = User(id=uuid4(), email="outsider@example.com", role=UserRole.MEMBER)
+    sample_project = Project(id=project_id, workspace_id=workspace_id, status=ProjectStatus.ACTIVE)
+    existing_task = Task(
+        id=task_id,
+        project_id=project_id,
+        project=sample_project,
+        title="Protected Task",
+    )
+
+    task_service.task_repo.get_task_detail = AsyncMock(return_value=existing_task)
+    task_service.workspace_repo.get_member = AsyncMock(return_value=None)  # Not a member!
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await task_service.delete_task(task_id=task_id, current_user=outsider_user)
+
+    assert exc_info.value.code == "NOT_FOUND"
+    assert "Task không tồn tại" in exc_info.value.message
