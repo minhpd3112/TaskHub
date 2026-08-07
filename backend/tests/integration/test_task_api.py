@@ -142,6 +142,39 @@ async def test_create_task_api_as_viewer_forbidden(async_client: AsyncClient) ->
 
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "FORBIDDEN"
+    assert response.json()["error"]["message"] == "Required role: OWNER"
+
+
+@pytest.mark.asyncio
+async def test_create_task_api_as_editor_forbidden(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR attempts to create task -> 403 Forbidden."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="ed_tw_owner")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="ed_tw_editor")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id,
+        member_id=editor_id,
+        role=WorkspaceRole.EDITOR,
+    )
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Editor Task Proj"},
+        headers=owner_headers,
+    )
+    assert proj_res.status_code == 201
+    project_id = proj_res.json()["data"]["id"]
+
+    # EDITOR calling create_task
+    response = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Editor Task", "assignee_id": str(editor_id)},
+        headers=editor_headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+    assert response.json()["error"]["message"] == "Required role: OWNER"
 
 
 @pytest.mark.asyncio
@@ -1057,3 +1090,202 @@ async def test_patch_task_priority_all_enums_api(
     )
     assert res.status_code == 200
     assert res.json()["data"]["priority"] == priority_val
+
+
+# ============================================================================
+# TH-005.5 Integration Tests: DELETE /tasks/{task_id}
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_delete_task_api_success_owner(async_client: AsyncClient) -> None:
+    """Integration test: OWNER deletes task via DELETE /tasks/{task_id} -> 204 No Content."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="del_owner")
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Delete Task API Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Task to be Deleted", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    # Delete task as OWNER
+    del_res = await async_client.delete(
+        f"/api/v1/tasks/{task_id}",
+        headers=owner_headers,
+    )
+    assert del_res.status_code == 204
+
+    # Verify task is deleted via GET detail -> 404
+    get_res = await async_client.get(
+        f"/api/v1/tasks/{task_id}",
+        headers=owner_headers,
+    )
+    assert get_res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_task_api_success_admin(async_client: AsyncClient) -> None:
+    """Integration test: System ADMIN deletes task -> 204 No Content."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="del_adm_owner")
+    admin_headers, _ = await _create_test_user(async_client, prefix="del_admin")
+
+    # Set user role to ADMIN in DB
+    engine = create_async_engine(settings.DATABASE_URL)
+    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with session_factory() as session:
+        from app.models.enums import UserRole
+        from app.models.user import User
+
+        # Find admin user by checking email in headers/auth
+        # We can extract user_id by making GET /users/me
+        me_res = await async_client.get("/api/v1/users/me", headers=admin_headers)
+        admin_user_id = UUID(me_res.json()["data"]["id"])
+
+        admin_db = await session.get(User, admin_user_id)
+        if admin_db:
+            admin_db.role = UserRole.ADMIN
+            await session.commit()
+    await engine.dispose()
+
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Admin Delete Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Admin Deletable Task", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    del_res = await async_client.delete(
+        f"/api/v1/tasks/{task_id}",
+        headers=admin_headers,
+    )
+    assert del_res.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_task_api_forbidden_editor(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR calling DELETE /tasks/{task_id} -> 403 FORBIDDEN."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="del_ed_owner")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="del_ed_editor")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id,
+        member_id=editor_id,
+        role=WorkspaceRole.EDITOR,
+    )
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Editor Delete Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Editor Assigned Task", "assignee_id": str(editor_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    del_res = await async_client.delete(
+        f"/api/v1/tasks/{task_id}",
+        headers=editor_headers,
+    )
+    assert del_res.status_code == 403
+    assert del_res.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_delete_task_api_forbidden_viewer(async_client: AsyncClient) -> None:
+    """Integration test: VIEWER calling DELETE /tasks/{task_id} -> 403 FORBIDDEN."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="del_vw_owner")
+    viewer_headers, viewer_id = await _create_test_user(async_client, prefix="del_vw_viewer")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id,
+        member_id=viewer_id,
+        role=WorkspaceRole.VIEWER,
+    )
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "Viewer Delete Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Viewer Accessible Task", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    del_res = await async_client.delete(
+        f"/api/v1/tasks/{task_id}",
+        headers=viewer_headers,
+    )
+    assert del_res.status_code == 403
+    assert del_res.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_delete_task_api_not_found(async_client: AsyncClient) -> None:
+    """Integration test: Random task_id -> 404 NOT_FOUND."""
+    owner_headers, _ = await _create_test_user(async_client, prefix="del_nf_owner")
+    random_task_id = uuid4()
+
+    del_res = await async_client.delete(
+        f"/api/v1/tasks/{random_task_id}",
+        headers=owner_headers,
+    )
+    assert del_res.status_code == 404
+    assert del_res.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_delete_task_api_not_found_idor(async_client: AsyncClient) -> None:
+    """Integration test: Outsider user deleting task -> 404 NOT_FOUND (IDOR Guard)."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="del_idor_owner")
+    outsider_headers, _ = await _create_test_user(async_client, prefix="del_idor_out")
+
+    workspace = await _create_workspace_with_member(owner_id=owner_id)
+
+    proj_res = await async_client.post(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        json={"name": "IDOR Delete Project"},
+        headers=owner_headers,
+    )
+    project_id = proj_res.json()["data"]["id"]
+
+    create_res = await async_client.post(
+        f"/api/v1/projects/{project_id}/tasks",
+        json={"title": "Protected Task", "assignee_id": str(owner_id)},
+        headers=owner_headers,
+    )
+    task_id = create_res.json()["data"]["id"]
+
+    del_res = await async_client.delete(
+        f"/api/v1/tasks/{task_id}",
+        headers=outsider_headers,
+    )
+    assert del_res.status_code == 404
+    assert del_res.json()["error"]["code"] == "NOT_FOUND"

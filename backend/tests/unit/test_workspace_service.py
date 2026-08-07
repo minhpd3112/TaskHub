@@ -514,3 +514,173 @@ async def test_delete_workspace_not_found(
         await workspace_service.delete_workspace(sample_user, uuid4())
 
     assert exc_info.value.code == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_by_id_success(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test get_workspace_by_id returns WorkspaceResponse when user is a member."""
+    ws_id = uuid4()
+    now = datetime.now(UTC)
+    ws = Workspace(id=ws_id, name="Test WS", owner_id=sample_user.id, created_at=now)
+    member = WorkspaceMember(
+        workspace_id=ws_id, user_id=sample_user.id, role=WorkspaceRole.OWNER, joined_at=now
+    )
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(return_value=member)
+
+    response = await workspace_service.get_workspace_by_id(sample_user, ws_id)
+
+    workspace_service.workspace_repo.get_by_id.assert_called_once_with(ws_id)
+    workspace_service.workspace_member_repo.get_member.assert_called_once_with(
+        ws_id, sample_user.id
+    )
+    assert response.id == ws_id
+    assert response.name == "Test WS"
+    assert response.owner_id == sample_user.id
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_by_id_not_found(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test get_workspace_by_id raises NotFoundError when workspace does not exist."""
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=None)
+
+    from app.core.exceptions import NotFoundError
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await workspace_service.get_workspace_by_id(sample_user, uuid4())
+
+    assert exc_info.value.code == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_by_id_non_member(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test get_workspace_by_id raises NotFoundError when user is not a member.
+
+    IDOR Guard enforcement.
+    """
+    ws_id = uuid4()
+    now = datetime.now(UTC)
+    ws = Workspace(id=ws_id, name="Private WS", owner_id=uuid4(), created_at=now)
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(return_value=None)
+
+    from app.core.exceptions import NotFoundError
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await workspace_service.get_workspace_by_id(sample_user, ws_id)
+
+    assert exc_info.value.code == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_list_workspace_members_non_member(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test list_workspace_members raises NotFoundError when caller is not a member (IDOR Guard)."""
+    ws_id = uuid4()
+    ws = Workspace(id=ws_id, name="Private WS", owner_id=uuid4(), created_at=datetime.now(UTC))
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(return_value=None)
+
+    from app.core.exceptions import NotFoundError
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await workspace_service.list_workspace_members(sample_user, ws_id)
+
+    assert exc_info.value.code == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_invite_member_non_member(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test invite_member raises NotFoundError when caller is not a member (IDOR Guard)."""
+    ws_id = uuid4()
+    ws = Workspace(id=ws_id, name="Private WS", owner_id=uuid4(), created_at=datetime.now(UTC))
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(return_value=None)
+
+    from app.core.exceptions import NotFoundError
+    from app.schemas.workspace import MemberInviteRequest
+
+    dto = MemberInviteRequest(email="someone@taskhub.io")
+    with pytest.raises(NotFoundError) as exc_info:
+        await workspace_service.invite_member(sample_user, ws_id, dto)
+
+    assert exc_info.value.code == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_update_member_role_non_member(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test update_member_role raises NotFoundError when caller is not a member (IDOR Guard)."""
+    ws_id = uuid4()
+    ws = Workspace(id=ws_id, name="Private WS", owner_id=uuid4(), created_at=datetime.now(UTC))
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(return_value=None)
+
+    from app.core.exceptions import NotFoundError
+    from app.schemas.workspace import MemberUpdateRoleRequest
+
+    dto = MemberUpdateRoleRequest(role=WorkspaceRole.EDITOR)
+    with pytest.raises(NotFoundError) as exc_info:
+        await workspace_service.update_member_role(sample_user, ws_id, uuid4(), dto)
+
+    assert exc_info.value.code == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_remove_member_non_member(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test remove_member raises NotFoundError when caller is not a member (IDOR Guard)."""
+    ws_id = uuid4()
+    ws = Workspace(id=ws_id, name="Private WS", owner_id=uuid4(), created_at=datetime.now(UTC))
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+    workspace_service.workspace_member_repo.get_member = AsyncMock(return_value=None)
+
+    from app.core.exceptions import NotFoundError
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await workspace_service.remove_member(sample_user, ws_id, uuid4())
+
+    assert exc_info.value.code == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_by_id_admin_bypass(
+    workspace_service: WorkspaceService, sample_user: User
+) -> None:
+    """Test system ADMIN can retrieve workspace details without being a member."""
+    admin_user = User(
+        id=uuid4(),
+        email="admin@taskhub.io",
+        full_name="System Admin",
+        hashed_password="hash",
+        role=UserRole.ADMIN,
+        is_active=True,
+    )
+    ws_id = uuid4()
+    now = datetime.now(UTC)
+    ws = Workspace(id=ws_id, name="Admin WS", owner_id=sample_user.id, created_at=now)
+
+    workspace_service.workspace_repo.get_by_id = AsyncMock(return_value=ws)
+
+    response = await workspace_service.get_workspace_by_id(admin_user, ws_id)
+
+    workspace_service.workspace_repo.get_by_id.assert_called_once_with(ws_id)
+    assert response.id == ws_id
+    assert response.name == "Admin WS"

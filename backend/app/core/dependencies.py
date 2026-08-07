@@ -95,9 +95,9 @@ def require_workspace_role(min_role: WorkspaceRole | str) -> Callable[..., Any]:
         # 3. Check workspace membership
         member = await workspace_repo.get_member(workspace_id, current_user.id)
         if not member:
-            raise ForbiddenError(
-                "Bạn không phải thành viên của workspace này.",
-                code="FORBIDDEN",
+            raise NotFoundError(
+                "Workspace không tồn tại.",
+                code="NOT_FOUND",
             )
 
         # 4. Check role hierarchy

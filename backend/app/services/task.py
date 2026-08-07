@@ -53,7 +53,7 @@ class TaskService:
 
         Raises:
             NotFoundError: If project does not exist or current user is not a workspace member.
-            ForbiddenError: If current user's role is VIEWER.
+            ForbiddenError: If current user's role is not OWNER (or system ADMIN).
             ValidationError: If project is ARCHIVED or assignee_id is not a workspace member.
         """
         # 1. Check project existence & status
@@ -73,9 +73,9 @@ class TaskService:
             if not member:
                 raise NotFoundError("Project không tồn tại", code="NOT_FOUND")
 
-            if member.role == WorkspaceRole.VIEWER:
+            if member.role != WorkspaceRole.OWNER:
                 raise ForbiddenError(
-                    "Bạn không có quyền tạo task trong project này",
+                    "Required role: OWNER",
                     code="FORBIDDEN",
                 )
 
@@ -432,3 +432,47 @@ class TaskService:
                 logger.warning(f"Failed to invalidate task list cache in Redis: {exc}")
 
         return updated_task
+
+    async def delete_task(
+        self,
+        task_id: UUID,
+        current_user: User,
+    ) -> None:
+        """Xóa công việc với đầy đủ kiểm tra RBAC và xóa Redis cache.
+
+        Raises:
+            NotFoundError: If task does not exist or user is not a member (404 IDOR Guard).
+            ForbiddenError: If current user is EDITOR or VIEWER (OWNER/ADMIN exclusive).
+        """
+        # 1. Fetch task with eager loaded project & workspace
+        task = await self.task_repo.get_task_detail(task_id)
+        if not task:
+            raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+        # 2. Check existence & IDOR Guard & RBAC Permissions
+        if current_user.role != UserRole.ADMIN:
+            member = await self.workspace_repo.get_member(
+                task.project.workspace_id, current_user.id
+            )
+            if not member:
+                raise NotFoundError("Task không tồn tại", code="NOT_FOUND")
+
+            if member.role != WorkspaceRole.OWNER:
+                raise ForbiddenError(
+                    "Required role: OWNER",
+                    code="FORBIDDEN",
+                )
+
+        # 3. Delete task from DB
+        project_id = task.project_id
+        await self.db.delete(task)
+        await self.db.commit()
+
+        # 4. Invalidate Redis Cache for project tasks list
+        if self.redis:
+            try:
+                keys = await self.redis.keys(f"tasks:project:{project_id}:*")
+                if keys:
+                    await self.redis.delete(*keys)
+            except Exception as exc:
+                logger.warning(f"Failed to invalidate task list cache in Redis: {exc}")

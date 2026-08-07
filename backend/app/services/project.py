@@ -6,6 +6,7 @@ from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.enums import ProjectStatus, WorkspaceRole
 from app.models.project import Project
 from app.repositories.project import ProjectRepository
+from app.repositories.task import TaskRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.project import ProjectCreateRequest, ProjectUpdateRequest
 
@@ -18,10 +19,12 @@ class ProjectService:
         db: AsyncSession,
         project_repo: ProjectRepository | None = None,
         workspace_repo: WorkspaceRepository | None = None,
+        task_repo: TaskRepository | None = None,
     ) -> None:
         self.db = db
         self.project_repo = project_repo or ProjectRepository(db)
         self.workspace_repo = workspace_repo or WorkspaceRepository(db)
+        self.task_repo = task_repo or TaskRepository(db)
 
     async def _get_project_with_access_check(
         self,
@@ -29,11 +32,11 @@ class ProjectService:
         current_user_id: UUID,
         is_admin: bool = False,
     ) -> Project:
-        """Get project by ID and verify membership and write permission (EDITOR/OWNER/ADMIN).
+        """Get project by ID and verify membership and write permission (OWNER/ADMIN).
 
         Raises:
             NotFoundError: If project does not exist or user is not a workspace member.
-            ForbiddenError: If member's role is VIEWER.
+            ForbiddenError: If member's role is not OWNER.
         """
         project = await self.project_repo.get_by_id(project_id)
         if not project:
@@ -44,7 +47,7 @@ class ProjectService:
             if not member:
                 raise NotFoundError("Project không tồn tại", code="NOT_FOUND")
 
-            if member.role == WorkspaceRole.VIEWER:
+            if member.role != WorkspaceRole.OWNER:
                 raise ForbiddenError("Bạn không có quyền thực hiện thao tác này", code="FORBIDDEN")
 
         return project
@@ -80,7 +83,7 @@ class ProjectService:
         page: int = 1,
         limit: int = 20,
     ) -> tuple[list[tuple[Project, int]], int]:
-        """List projects in a workspace with pagination and 404 Guard IDOR protection.
+        """List projects in a workspace with pagination, 404 Guard, and EDITOR scope filtering.
 
         Raises:
             NotFoundError: If workspace with workspace_id does not exist or user is not a member.
@@ -89,15 +92,20 @@ class ProjectService:
         if not workspace:
             raise NotFoundError("Workspace không tồn tại", code="NOT_FOUND")
 
+        editor_id: UUID | None = None
         if not is_admin:
             member = await self.workspace_repo.get_member(workspace_id, current_user_id)
             if not member:
                 raise NotFoundError("Workspace không tồn tại", code="NOT_FOUND")
 
+            if member.role == WorkspaceRole.EDITOR:
+                editor_id = current_user_id
+
         skip = (page - 1) * limit
         return await self.project_repo.list_by_workspace_with_task_count(
             workspace_id=workspace_id,
             status=status,
+            editor_id=editor_id,
             skip=skip,
             limit=limit,
         )
@@ -124,6 +132,13 @@ class ProjectService:
             member = await self.workspace_repo.get_member(project.workspace_id, current_user_id)
             if not member:
                 raise NotFoundError("Project không tồn tại", code="NOT_FOUND")
+
+            if member.role == WorkspaceRole.EDITOR:
+                has_assigned_task = await self.task_repo.exists_assigned_task_in_project(
+                    project_id, current_user_id
+                )
+                if not has_assigned_task:
+                    raise NotFoundError("Project không tồn tại", code="NOT_FOUND")
 
         return project, task_count
 

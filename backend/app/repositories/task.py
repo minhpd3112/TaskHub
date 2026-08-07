@@ -143,3 +143,16 @@ class TaskRepository(BaseRepository[Task]):
     async def update_priority(self, task_id: UUID, priority: TaskPriority) -> Task | None:
         """Update task priority and return with eager-loaded relationships."""
         return await self.update_task(task_id, priority=priority)
+
+    async def exists_assigned_task_in_project(self, project_id: UUID, user_id: UUID) -> bool:
+        """Check if there is at least one task in the project assigned to specified user."""
+        stmt = (
+            select(Task.id)
+            .where(
+                Task.project_id == project_id,
+                Task.assignee_id == user_id,
+            )
+            .limit(1)
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none() is not None

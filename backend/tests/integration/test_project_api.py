@@ -109,10 +109,10 @@ async def test_create_project_as_owner_success(async_client: AsyncClient) -> Non
 
 
 @pytest.mark.asyncio
-async def test_create_project_as_editor_success(async_client: AsyncClient) -> None:
-    """Integration test: EDITOR creates a project -> 201 Created."""
-    owner_headers, owner_id = await _create_test_user(async_client, prefix="owner")
-    editor_headers, editor_id = await _create_test_user(async_client, prefix="editor")
+async def test_create_project_as_editor_forbidden(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR attempts to create a project -> 403 Forbidden."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="owner_ed")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="editor_ed")
 
     workspace = await _create_workspace_with_member(
         owner_id=owner_id,
@@ -128,11 +128,8 @@ async def test_create_project_as_editor_success(async_client: AsyncClient) -> No
         headers=editor_headers,
     )
 
-    assert response.status_code == 201
-    data = response.json()["data"]
-    assert data["name"] == "Editor Project"
-    assert data["description"] is None
-    assert data["status"] == "ACTIVE"
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
 
 
 @pytest.mark.asyncio
@@ -158,8 +155,8 @@ async def test_create_project_as_viewer_forbidden(async_client: AsyncClient) -> 
 
 
 @pytest.mark.asyncio
-async def test_create_project_non_member_forbidden(async_client: AsyncClient) -> None:
-    """Integration test: Non-member attempts to create a project -> 403 Forbidden."""
+async def test_create_project_non_member_not_found(async_client: AsyncClient) -> None:
+    """Integration test: Non-member attempts to create a project -> 404 NOT_FOUND (IDOR Guard)."""
     _, owner_id = await _create_test_user(async_client, prefix="owner")
     outsider_headers, _ = await _create_test_user(async_client, prefix="outsider")
 
@@ -171,8 +168,8 @@ async def test_create_project_non_member_forbidden(async_client: AsyncClient) ->
         headers=outsider_headers,
     )
 
-    assert response.status_code == 403
-    assert response.json()["error"]["code"] == "FORBIDDEN"
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "NOT_FOUND"
 
 
 @pytest.mark.asyncio
@@ -353,6 +350,50 @@ async def test_get_project_api_non_member_404(async_client: AsyncClient) -> None
     assert response.json()["error"]["code"] == "NOT_FOUND"
 
 
+@pytest.mark.asyncio
+async def test_get_project_detail_api_editor_with_task_success(
+    async_client: AsyncClient,
+) -> None:
+    """Integration test: EDITOR with assigned task in project gets 200 OK."""
+    _, owner_id = await _create_test_user(async_client, prefix="get_ed_owner")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="get_ed_user")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+    project = await _create_project_in_db(workspace.id, name="Editor Task Proj")
+    await _create_task_in_db(project.id, editor_id, title="Assigned to Editor")
+
+    response = await async_client.get(
+        f"/api/v1/projects/{project.id}",
+        headers=editor_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["id"] == str(project.id)
+    assert data["name"] == "Editor Task Proj"
+    assert data["task_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_project_detail_api_editor_without_task_not_found(
+    async_client: AsyncClient,
+) -> None:
+    """Integration test: EDITOR without assigned task in project gets 404 NOT_FOUND."""
+    _, owner_id = await _create_test_user(async_client, prefix="get_ed_owner2")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="get_ed_user2")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+    project = await _create_project_in_db(workspace.id, name="Editor No Task Proj")
+
+    response = await async_client.get(
+        f"/api/v1/projects/{project.id}",
+        headers=editor_headers,
+    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
 async def _create_task_in_db(
     project_id: UUID,
     user_id: UUID,
@@ -396,6 +437,26 @@ async def test_update_project_api_success(async_client: AsyncClient) -> None:
     assert data["id"] == str(project.id)
     assert data["name"] == "Updated Project Name"
     assert data["description"] == "Updated Description"
+
+
+@pytest.mark.asyncio
+async def test_update_project_api_forbidden_for_editor(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR attempting to update project -> 403 Forbidden."""
+    _, owner_id = await _create_test_user(async_client, prefix="upd_owner_e")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="upd_editor")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+    project = await _create_project_in_db(workspace.id, name="Project E")
+
+    response = await async_client.patch(
+        f"/api/v1/projects/{project.id}",
+        json={"name": "Forbidden Change"},
+        headers=editor_headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
 
 
 @pytest.mark.asyncio
@@ -512,6 +573,44 @@ async def test_delete_project_api_success(async_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_archive_project_api_forbidden_for_editor(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR attempting to archive project -> 403 Forbidden."""
+    _, owner_id = await _create_test_user(async_client, prefix="arch_owner_e")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="arch_editor")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+    project = await _create_project_in_db(workspace.id, name="Project Arch E")
+
+    response = await async_client.patch(
+        f"/api/v1/projects/{project.id}/archive",
+        headers=editor_headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_delete_project_api_forbidden_for_editor(async_client: AsyncClient) -> None:
+    """Integration test: EDITOR attempting to delete project -> 403 Forbidden."""
+    _, owner_id = await _create_test_user(async_client, prefix="del_owner_e")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="del_editor")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+    project = await _create_project_in_db(workspace.id, name="Project Protected From Editor")
+
+    response = await async_client.delete(
+        f"/api/v1/projects/{project.id}",
+        headers=editor_headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
 async def test_delete_project_api_forbidden_for_viewer(async_client: AsyncClient) -> None:
     """Integration test: VIEWER attempting to delete project -> 403 Forbidden."""
     _, owner_id = await _create_test_user(async_client, prefix="del_owner_v")
@@ -528,3 +627,70 @@ async def test_delete_project_api_forbidden_for_viewer(async_client: AsyncClient
 
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_list_projects_api_editor_sees_only_assigned_projects(
+    async_client: AsyncClient,
+) -> None:
+    """Integration test: EDITOR calling GET /projects sees only assigned projects."""
+    _, owner_id = await _create_test_user(async_client, prefix="lst_ed_owner")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="lst_ed_user")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+
+    proj_a = await _create_project_in_db(workspace.id, name="Project A (Has Task)")
+    await _create_project_in_db(workspace.id, name="Project B (No Task)")
+
+    await _create_task_in_db(proj_a.id, editor_id, title="Editor Task A")
+
+    response = await async_client.get(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        headers=editor_headers,
+    )
+
+    assert response.status_code == 200
+    res_data = response.json()
+    items = res_data["data"]
+    pagination = res_data["pagination"]
+
+    assert pagination["total"] == 1
+    assert len(items) == 1
+    assert items[0]["id"] == str(proj_a.id)
+    assert items[0]["name"] == "Project A (Has Task)"
+
+
+@pytest.mark.asyncio
+async def test_list_projects_api_owner_sees_all_projects(
+    async_client: AsyncClient,
+) -> None:
+    """Integration test: OWNER calling GET /workspaces/{id}/projects sees all projects."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="lst_ow_owner")
+    _, editor_id = await _create_test_user(async_client, prefix="lst_ow_editor")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+
+    proj_a = await _create_project_in_db(workspace.id, name="Project A (Has Task)")
+    proj_b = await _create_project_in_db(workspace.id, name="Project B (No Task)")
+
+    await _create_task_in_db(proj_a.id, editor_id, title="Editor Task A")
+
+    response = await async_client.get(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        headers=owner_headers,
+    )
+
+    assert response.status_code == 200
+    res_data = response.json()
+    items = res_data["data"]
+    pagination = res_data["pagination"]
+
+    assert pagination["total"] == 2
+    assert len(items) == 2
+    item_ids = {item["id"] for item in items}
+    assert str(proj_a.id) in item_ids
+    assert str(proj_b.id) in item_ids
