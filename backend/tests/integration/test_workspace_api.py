@@ -867,9 +867,11 @@ async def test_get_workspace_detail_not_found(async_client: AsyncClient) -> None
 
 
 @pytest.mark.asyncio
-async def test_get_workspace_detail_non_member_forbidden(async_client: AsyncClient) -> None:
-    """Integration test: User A accessing User B's workspace returns 403 FORBIDDEN."""
-    # User B (Owner)
+async def test_get_workspace_detail_api_non_member_not_found(
+    async_client: AsyncClient,
+) -> None:
+    """Integration test: Non-member calling GET /workspaces/{id} returns 404 NOT_FOUND."""
+    # User B (Owner) creates workspace
     email_b = f"user_b_ws_{uuid4().hex[:8]}@taskhub.io"
     password = "Password123!"
     await async_client.post(
@@ -889,7 +891,7 @@ async def test_get_workspace_detail_non_member_forbidden(async_client: AsyncClie
     )
     ws_id = create_res.json()["data"]["id"]
 
-    # User A (Non-member)
+    # User A (Non-member) calls GET /api/v1/workspaces/{id}
     email_a = f"user_a_ws_{uuid4().hex[:8]}@taskhub.io"
     await async_client.post(
         "/api/v1/auth/register",
@@ -902,5 +904,93 @@ async def test_get_workspace_detail_non_member_forbidden(async_client: AsyncClie
     headers_a = {"Authorization": f"Bearer {login_a.json()['data']['access_token']}"}
 
     response = await async_client.get(f"/api/v1/workspaces/{ws_id}", headers=headers_a)
-    assert response.status_code == 403
-    assert response.json()["error"]["code"] == "FORBIDDEN"
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_list_workspace_members_api_non_member_not_found(
+    async_client: AsyncClient,
+) -> None:
+    """Integration test: Non-member calling GET /workspaces/{id}/members returns 404 NOT_FOUND."""
+    # User B (Owner) creates workspace
+    email_b = f"owner_lwm_{uuid4().hex[:8]}@taskhub.io"
+    password = "Password123!"
+    await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": email_b, "full_name": "Owner User", "password": password},
+    )
+    login_b = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": email_b, "password": password},
+    )
+    headers_b = {"Authorization": f"Bearer {login_b.json()['data']['access_token']}"}
+
+    create_res = await async_client.post(
+        "/api/v1/workspaces",
+        json={"name": "Members Workspace"},
+        headers=headers_b,
+    )
+    ws_id = create_res.json()["data"]["id"]
+
+    # User A (Non-member) calls GET /api/v1/workspaces/{id}/members
+    email_a = f"non_member_lwm_{uuid4().hex[:8]}@taskhub.io"
+    await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": email_a, "full_name": "Non Member", "password": password},
+    )
+    login_a = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": email_a, "password": password},
+    )
+    headers_a = {"Authorization": f"Bearer {login_a.json()['data']['access_token']}"}
+
+    response = await async_client.get(f"/api/v1/workspaces/{ws_id}/members", headers=headers_a)
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_invite_member_api_non_member_not_found(
+    async_client: AsyncClient,
+) -> None:
+    """Integration test: Non-member calling POST /workspaces/{id}/members returns 404 NOT_FOUND."""
+    # User B (Owner) creates workspace
+    email_b = f"owner_inv_{uuid4().hex[:8]}@taskhub.io"
+    password = "Password123!"
+    await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": email_b, "full_name": "Owner User", "password": password},
+    )
+    login_b = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": email_b, "password": password},
+    )
+    headers_b = {"Authorization": f"Bearer {login_b.json()['data']['access_token']}"}
+
+    create_res = await async_client.post(
+        "/api/v1/workspaces",
+        json={"name": "Invite Workspace"},
+        headers=headers_b,
+    )
+    ws_id = create_res.json()["data"]["id"]
+
+    # User A (Non-member) calls POST /api/v1/workspaces/{id}/members
+    email_a = f"non_member_inv_{uuid4().hex[:8]}@taskhub.io"
+    await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": email_a, "full_name": "Non Member", "password": password},
+    )
+    login_a = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": email_a, "password": password},
+    )
+    headers_a = {"Authorization": f"Bearer {login_a.json()['data']['access_token']}"}
+
+    response = await async_client.post(
+        f"/api/v1/workspaces/{ws_id}/members",
+        json={"email": "target@taskhub.io", "role": "EDITOR"},
+        headers=headers_a,
+    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "NOT_FOUND"

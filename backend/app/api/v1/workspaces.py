@@ -82,6 +82,10 @@ async def list_my_workspaces(
     response_model=SuccessResponse[WorkspaceMemberResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Invite member to workspace",
+    description=(
+        "Invite a new member to the workspace (OWNER only). "
+        "If caller is not a member of the workspace, returns 404 NOT_FOUND (IDOR Guard)."
+    ),
     operation_id="themThanhVien",
 )
 async def invite_member(
@@ -100,6 +104,10 @@ async def invite_member(
     response_model=SuccessResponse[list[WorkspaceMemberDetailResponse]],
     status_code=status.HTTP_200_OK,
     summary="List workspace members",
+    description=(
+        "Retrieve all members of a workspace. "
+        "If caller is not a member of the workspace, returns 404 NOT_FOUND (IDOR Guard)."
+    ),
     operation_id="lietKeThanhVien",
 )
 async def list_workspace_members(
@@ -117,6 +125,10 @@ async def list_workspace_members(
     response_model=SuccessResponse[WorkspaceMemberResponse],
     status_code=status.HTTP_200_OK,
     summary="Update workspace member role",
+    description=(
+        "Update role of an existing workspace member (OWNER only). "
+        "If caller is not a member of the workspace, returns 404 NOT_FOUND (IDOR Guard)."
+    ),
     operation_id="capNhatVaiTroThanhVien",
 )
 async def update_member_role(
@@ -135,6 +147,10 @@ async def update_member_role(
     "/{workspace_id}/members/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Remove workspace member",
+    description=(
+        "Remove a member from the workspace (OWNER only). "
+        "If caller is not a member of the workspace, returns 404 NOT_FOUND (IDOR Guard)."
+    ),
     operation_id="xoaThanhVien",
 )
 async def remove_member(
@@ -153,7 +169,10 @@ async def remove_member(
     response_model=SuccessResponse[ProjectResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Tạo project mới trong workspace",
-    description=("Cho phép thành viên có vai trò OWNER tạo một dự án mới trong Workspace."),
+    description=(
+        "Cho phép thành viên có vai trò OWNER tạo một dự án mới trong Workspace. "
+        "Nếu caller không phải là thành viên workspace, trả về 404 NOT_FOUND (IDOR Guard)."
+    ),
     operation_id="taoDuAn",
 )
 async def create_project(
@@ -175,7 +194,8 @@ async def create_project(
     description=(
         "Xem danh sách dự án thuộc một Workspace kèm số lượng task. "
         "Với vai trò EDITOR, hệ thống tự động lọc và chỉ trả về danh sách dự án "
-        "có ít nhất 1 task được gán cho EDITOR đó."
+        "có ít nhất 1 task được gán cho EDITOR đó. "
+        "Nếu caller không phải là thành viên workspace, trả về 404 NOT_FOUND (IDOR Guard)."
     ),
     operation_id="lietKeDuAn",
 )
@@ -226,6 +246,10 @@ async def list_projects(
     response_model=SuccessResponse[WorkspaceResponse],
     status_code=status.HTTP_200_OK,
     summary="Get workspace details",
+    description=(
+        "Retrieve details of a single workspace by ID. "
+        "If caller is not a member of the workspace, returns 404 NOT_FOUND (IDOR Guard)."
+    ),
     operation_id="xemWorkspace",
 )
 async def get_workspace(
@@ -243,6 +267,10 @@ async def get_workspace(
     response_model=SuccessResponse[WorkspaceResponse],
     status_code=status.HTTP_200_OK,
     summary="Update workspace",
+    description=(
+        "Update workspace name (OWNER only). "
+        "If caller is not a member of the workspace, returns 404 NOT_FOUND (IDOR Guard)."
+    ),
     operation_id="capNhatWorkspace",
 )
 async def update_workspace(
@@ -260,6 +288,10 @@ async def update_workspace(
     "/{workspace_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete workspace",
+    description=(
+        "Delete workspace (OWNER only). "
+        "If caller is not a member of the workspace, returns 404 NOT_FOUND (IDOR Guard)."
+    ),
     operation_id="xoaWorkspace",
 )
 async def delete_workspace(

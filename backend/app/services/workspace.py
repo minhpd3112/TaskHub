@@ -75,7 +75,7 @@ class WorkspaceService:
         if current_user.role != UserRole.ADMIN:
             member = await self.workspace_member_repo.get_member(workspace_id, current_user.id)
             if not member:
-                raise ForbiddenError("Not a member of this workspace.", code="FORBIDDEN")
+                raise NotFoundError("Workspace not found.", code="NOT_FOUND")
 
         return WorkspaceResponse.model_validate(workspace)
 
@@ -91,7 +91,9 @@ class WorkspaceService:
             caller_member = await self.workspace_member_repo.get_member(
                 workspace_id, current_user.id
             )
-            if not caller_member or caller_member.role != WorkspaceRole.OWNER:
+            if not caller_member:
+                raise NotFoundError("Workspace not found.", code="NOT_FOUND")
+            if caller_member.role != WorkspaceRole.OWNER:
                 raise ForbiddenError(
                     "Only workspace OWNER or system ADMIN can invite members.", code="FORBIDDEN"
                 )
@@ -131,7 +133,9 @@ class WorkspaceService:
             caller_member = await self.workspace_member_repo.get_member(
                 workspace_id, current_user.id
             )
-            if not caller_member or caller_member.role != WorkspaceRole.OWNER:
+            if not caller_member:
+                raise NotFoundError("Workspace not found.", code="NOT_FOUND")
+            if caller_member.role != WorkspaceRole.OWNER:
                 raise ForbiddenError(
                     "Only workspace OWNER or system ADMIN can update member roles.",
                     code="FORBIDDEN",
@@ -169,7 +173,9 @@ class WorkspaceService:
             caller_member = await self.workspace_member_repo.get_member(
                 workspace_id, current_user.id
             )
-            if not caller_member or caller_member.role != WorkspaceRole.OWNER:
+            if not caller_member:
+                raise NotFoundError("Workspace not found.", code="NOT_FOUND")
+            if caller_member.role != WorkspaceRole.OWNER:
                 raise ForbiddenError(
                     "Only workspace OWNER or system ADMIN can remove members.", code="FORBIDDEN"
                 )
@@ -207,7 +213,7 @@ class WorkspaceService:
                 workspace_id, current_user.id
             )
             if not caller_member:
-                raise ForbiddenError("Not a member of this workspace.", code="FORBIDDEN")
+                raise NotFoundError("Workspace not found.", code="NOT_FOUND")
 
         members = await self.workspace_member_repo.list_members_with_user_details(workspace_id)
         return [
@@ -233,7 +239,9 @@ class WorkspaceService:
             caller_member = await self.workspace_member_repo.get_member(
                 workspace_id, current_user.id
             )
-            if not caller_member or caller_member.role != WorkspaceRole.OWNER:
+            if not caller_member:
+                raise NotFoundError("Workspace not found.", code="NOT_FOUND")
+            if caller_member.role != WorkspaceRole.OWNER:
                 raise ForbiddenError(
                     "Only workspace OWNER or system ADMIN can update workspace.",
                     code="FORBIDDEN",
@@ -256,7 +264,9 @@ class WorkspaceService:
             caller_member = await self.workspace_member_repo.get_member(
                 workspace_id, current_user.id
             )
-            if not caller_member or caller_member.role != WorkspaceRole.OWNER:
+            if not caller_member:
+                raise NotFoundError("Workspace not found.", code="NOT_FOUND")
+            if caller_member.role != WorkspaceRole.OWNER:
                 raise ForbiddenError(
                     "Only workspace OWNER or system ADMIN can delete workspace.",
                     code="FORBIDDEN",

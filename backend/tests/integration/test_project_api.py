@@ -155,8 +155,8 @@ async def test_create_project_as_viewer_forbidden(async_client: AsyncClient) -> 
 
 
 @pytest.mark.asyncio
-async def test_create_project_non_member_forbidden(async_client: AsyncClient) -> None:
-    """Integration test: Non-member attempts to create a project -> 403 Forbidden."""
+async def test_create_project_non_member_not_found(async_client: AsyncClient) -> None:
+    """Integration test: Non-member attempts to create a project -> 404 NOT_FOUND (IDOR Guard)."""
     _, owner_id = await _create_test_user(async_client, prefix="owner")
     outsider_headers, _ = await _create_test_user(async_client, prefix="outsider")
 
@@ -168,8 +168,8 @@ async def test_create_project_non_member_forbidden(async_client: AsyncClient) ->
         headers=outsider_headers,
     )
 
-    assert response.status_code == 403
-    assert response.json()["error"]["code"] == "FORBIDDEN"
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "NOT_FOUND"
 
 
 @pytest.mark.asyncio
@@ -633,7 +633,7 @@ async def test_delete_project_api_forbidden_for_viewer(async_client: AsyncClient
 async def test_list_projects_api_editor_sees_only_assigned_projects(
     async_client: AsyncClient,
 ) -> None:
-    """Integration test: EDITOR calling GET /workspaces/{id}/projects sees only projects with assigned tasks."""
+    """Integration test: EDITOR calling GET /projects sees only assigned projects."""
     _, owner_id = await _create_test_user(async_client, prefix="lst_ed_owner")
     editor_headers, editor_id = await _create_test_user(async_client, prefix="lst_ed_user")
 
