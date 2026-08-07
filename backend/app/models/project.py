@@ -4,7 +4,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -21,6 +21,7 @@ class Project(Base, UUIDMixin, TimestampMixin):
     """Project ORM model."""
 
     __tablename__ = "projects"
+    __table_args__ = (Index("ix_projects_workspace_status", "workspace_id", "status"),)
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
