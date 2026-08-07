@@ -121,3 +121,13 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 CREATE INDEX IF NOT EXISTS ix_comments_task_id ON comments (task_id);
 CREATE INDEX IF NOT EXISTS ix_comments_task_created_at ON comments (task_id, created_at);
+
+-- 2.9 user_notification_settings
+CREATE TABLE IF NOT EXISTS user_notification_settings (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    task_assigned BOOLEAN NOT NULL DEFAULT true,
+    task_status_changed BOOLEAN NOT NULL DEFAULT true,
+    task_commented BOOLEAN NOT NULL DEFAULT true,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_user_notification_settings_user_id ON user_notification_settings (user_id);
