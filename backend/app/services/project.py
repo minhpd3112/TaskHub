@@ -83,7 +83,7 @@ class ProjectService:
         page: int = 1,
         limit: int = 20,
     ) -> tuple[list[tuple[Project, int]], int]:
-        """List projects in a workspace with pagination and 404 Guard IDOR protection.
+        """List projects in a workspace with pagination, 404 Guard, and EDITOR scope filtering.
 
         Raises:
             NotFoundError: If workspace with workspace_id does not exist or user is not a member.
@@ -92,15 +92,20 @@ class ProjectService:
         if not workspace:
             raise NotFoundError("Workspace không tồn tại", code="NOT_FOUND")
 
+        editor_id: UUID | None = None
         if not is_admin:
             member = await self.workspace_repo.get_member(workspace_id, current_user_id)
             if not member:
                 raise NotFoundError("Workspace không tồn tại", code="NOT_FOUND")
 
+            if member.role == WorkspaceRole.EDITOR:
+                editor_id = current_user_id
+
         skip = (page - 1) * limit
         return await self.project_repo.list_by_workspace_with_task_count(
             workspace_id=workspace_id,
             status=status,
+            editor_id=editor_id,
             skip=skip,
             limit=limit,
         )

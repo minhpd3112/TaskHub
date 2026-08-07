@@ -44,16 +44,27 @@ class ProjectRepository(BaseRepository[Project]):
         self,
         workspace_id: UUID,
         status: ProjectStatus | None = None,
+        editor_id: UUID | None = None,
         skip: int = 0,
         limit: int = 20,
     ) -> tuple[list[tuple[Project, int]], int]:
-        """List projects in a workspace with their associated task count."""
+        """List projects in a workspace with task count, optionally filtered for EDITOR scope."""
+        # Base query for counting total matching projects
         count_stmt = select(func.count(Project.id)).where(Project.workspace_id == workspace_id)
         if status is not None:
             count_stmt = count_stmt.where(Project.status == status)
+
+        if editor_id is not None:
+            # Filter projects that contain at least one task assigned to editor_id
+            editor_proj_subq = (
+                select(Task.project_id).where(Task.assignee_id == editor_id).distinct()
+            )
+            count_stmt = count_stmt.where(Project.id.in_(editor_proj_subq))
+
         total_result = await self.db.execute(count_stmt)
         total = total_result.scalar() or 0
 
+        # Base query for selecting projects and counting associated tasks
         stmt = (
             select(Project, func.count(Task.id).label("task_count"))
             .outerjoin(Task, Task.project_id == Project.id)
@@ -61,6 +72,12 @@ class ProjectRepository(BaseRepository[Project]):
         )
         if status is not None:
             stmt = stmt.where(Project.status == status)
+
+        if editor_id is not None:
+            editor_proj_subq = (
+                select(Task.project_id).where(Task.assignee_id == editor_id).distinct()
+            )
+            stmt = stmt.where(Project.id.in_(editor_proj_subq))
 
         stmt = (
             stmt.group_by(Project.id).order_by(Project.created_at.desc()).offset(skip).limit(limit)

@@ -172,7 +172,11 @@ async def create_project(
     response_model=PaginatedResponse[ProjectListItemResponse],
     status_code=status.HTTP_200_OK,
     summary="Danh sách dự án trong workspace",
-    description="Xem danh sách dự án thuộc một Workspace kèm số lượng task.",
+    description=(
+        "Xem danh sách dự án thuộc một Workspace kèm số lượng task. "
+        "Với vai trò EDITOR, hệ thống tự động lọc và chỉ trả về danh sách dự án "
+        "có ít nhất 1 task được gán cho EDITOR đó."
+    ),
     operation_id="lietKeDuAn",
 )
 async def list_projects(

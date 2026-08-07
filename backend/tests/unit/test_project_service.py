@@ -85,8 +85,10 @@ async def test_list_projects_success(project_service: ProjectService) -> None:
         created_at=datetime.now(UTC),
     )
 
+    mock_member = AsyncMock()
+    mock_member.role = WorkspaceRole.OWNER
     project_service.workspace_repo.get_by_id = AsyncMock(return_value=sample_workspace)
-    project_service.workspace_repo.get_member = AsyncMock(return_value=AsyncMock())
+    project_service.workspace_repo.get_member = AsyncMock(return_value=mock_member)
     project_service.project_repo.list_by_workspace_with_task_count = AsyncMock(
         return_value=([(project1, 5)], 1)
     )
@@ -105,7 +107,71 @@ async def test_list_projects_success(project_service: ProjectService) -> None:
     assert items[0][0].name == "Project 1"
     assert items[0][1] == 5
     project_service.project_repo.list_by_workspace_with_task_count.assert_called_once_with(
-        workspace_id=workspace_id, status=ProjectStatus.ACTIVE, skip=0, limit=20
+        workspace_id=workspace_id, status=ProjectStatus.ACTIVE, editor_id=None, skip=0, limit=20
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_projects_editor_role_passes_editor_id(project_service: ProjectService) -> None:
+    """Test list_projects with EDITOR role passes editor_id = current_user_id."""
+    workspace_id = uuid4()
+    user_id = uuid4()
+    sample_workspace = Workspace(id=workspace_id, name="Test Workspace", owner_id=uuid4())
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.EDITOR
+    )
+
+    project_service.workspace_repo.get_by_id = AsyncMock(return_value=sample_workspace)
+    project_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+    project_service.project_repo.list_by_workspace_with_task_count = AsyncMock(return_value=([], 0))
+
+    await project_service.list_projects(
+        workspace_id=workspace_id,
+        current_user_id=user_id,
+        is_admin=False,
+        page=1,
+        limit=20,
+    )
+
+    project_service.project_repo.list_by_workspace_with_task_count.assert_called_once_with(
+        workspace_id=workspace_id,
+        status=None,
+        editor_id=user_id,
+        skip=0,
+        limit=20,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_projects_owner_role_passes_editor_id_none(
+    project_service: ProjectService,
+) -> None:
+    """Test list_projects with OWNER role passes editor_id = None."""
+    workspace_id = uuid4()
+    user_id = uuid4()
+    sample_workspace = Workspace(id=workspace_id, name="Test Workspace", owner_id=user_id)
+    owner_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.OWNER
+    )
+
+    project_service.workspace_repo.get_by_id = AsyncMock(return_value=sample_workspace)
+    project_service.workspace_repo.get_member = AsyncMock(return_value=owner_member)
+    project_service.project_repo.list_by_workspace_with_task_count = AsyncMock(return_value=([], 0))
+
+    await project_service.list_projects(
+        workspace_id=workspace_id,
+        current_user_id=user_id,
+        is_admin=False,
+        page=1,
+        limit=20,
+    )
+
+    project_service.project_repo.list_by_workspace_with_task_count.assert_called_once_with(
+        workspace_id=workspace_id,
+        status=None,
+        editor_id=None,
+        skip=0,
+        limit=20,
     )
 
 

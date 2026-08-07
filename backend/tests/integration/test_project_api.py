@@ -627,3 +627,70 @@ async def test_delete_project_api_forbidden_for_viewer(async_client: AsyncClient
 
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_list_projects_api_editor_sees_only_assigned_projects(
+    async_client: AsyncClient,
+) -> None:
+    """Integration test: EDITOR calling GET /workspaces/{id}/projects sees only projects with assigned tasks."""
+    _, owner_id = await _create_test_user(async_client, prefix="lst_ed_owner")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="lst_ed_user")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+
+    proj_a = await _create_project_in_db(workspace.id, name="Project A (Has Task)")
+    await _create_project_in_db(workspace.id, name="Project B (No Task)")
+
+    await _create_task_in_db(proj_a.id, editor_id, title="Editor Task A")
+
+    response = await async_client.get(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        headers=editor_headers,
+    )
+
+    assert response.status_code == 200
+    res_data = response.json()
+    items = res_data["data"]
+    pagination = res_data["pagination"]
+
+    assert pagination["total"] == 1
+    assert len(items) == 1
+    assert items[0]["id"] == str(proj_a.id)
+    assert items[0]["name"] == "Project A (Has Task)"
+
+
+@pytest.mark.asyncio
+async def test_list_projects_api_owner_sees_all_projects(
+    async_client: AsyncClient,
+) -> None:
+    """Integration test: OWNER calling GET /workspaces/{id}/projects sees all projects."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="lst_ow_owner")
+    _, editor_id = await _create_test_user(async_client, prefix="lst_ow_editor")
+
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+
+    proj_a = await _create_project_in_db(workspace.id, name="Project A (Has Task)")
+    proj_b = await _create_project_in_db(workspace.id, name="Project B (No Task)")
+
+    await _create_task_in_db(proj_a.id, editor_id, title="Editor Task A")
+
+    response = await async_client.get(
+        f"/api/v1/workspaces/{workspace.id}/projects",
+        headers=owner_headers,
+    )
+
+    assert response.status_code == 200
+    res_data = response.json()
+    items = res_data["data"]
+    pagination = res_data["pagination"]
+
+    assert pagination["total"] == 2
+    assert len(items) == 2
+    item_ids = {item["id"] for item in items}
+    assert str(proj_a.id) in item_ids
+    assert str(proj_b.id) in item_ids
