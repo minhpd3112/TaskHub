@@ -64,6 +64,21 @@ class WorkspaceService:
             for workspace, role in items
         ]
 
+    async def get_workspace_by_id(
+        self, current_user: User, workspace_id: UUID
+    ) -> WorkspaceResponse:
+        """Retrieve workspace details by ID if user is a member or System ADMIN."""
+        workspace = await self.workspace_repo.get_by_id(workspace_id)
+        if not workspace:
+            raise NotFoundError("Workspace not found.", code="NOT_FOUND")
+
+        if current_user.role != UserRole.ADMIN:
+            member = await self.workspace_member_repo.get_member(workspace_id, current_user.id)
+            if not member:
+                raise ForbiddenError("Not a member of this workspace.", code="FORBIDDEN")
+
+        return WorkspaceResponse.model_validate(workspace)
+
     async def invite_member(
         self, current_user: User, workspace_id: UUID, dto: MemberInviteRequest
     ) -> WorkspaceMemberResponse:

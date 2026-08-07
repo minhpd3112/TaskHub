@@ -148,40 +148,6 @@ async def remove_member(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.patch(
-    "/{workspace_id}",
-    response_model=SuccessResponse[WorkspaceResponse],
-    status_code=status.HTTP_200_OK,
-    summary="Update workspace",
-    operation_id="capNhatWorkspace",
-)
-async def update_workspace(
-    workspace_id: UUID,
-    dto: WorkspaceUpdateRequest,
-    current_user: User = Depends(get_current_user),
-    service: WorkspaceService = Depends(get_workspace_service),
-) -> SuccessResponse[WorkspaceResponse]:
-    """Update workspace name."""
-    workspace = await service.update_workspace(current_user, workspace_id, dto)
-    return SuccessResponse(data=workspace)
-
-
-@router.delete(
-    "/{workspace_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete workspace",
-    operation_id="xoaWorkspace",
-)
-async def delete_workspace(
-    workspace_id: UUID,
-    current_user: User = Depends(get_current_user),
-    service: WorkspaceService = Depends(get_workspace_service),
-) -> Response:
-    """Delete workspace."""
-    await service.delete_workspace(current_user, workspace_id)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
 @router.post(
     "/{workspace_id}/projects",
     response_model=SuccessResponse[ProjectResponse],
@@ -251,3 +217,54 @@ async def list_projects(
             total_pages=total_pages,
         ),
     )
+
+
+@router.get(
+    "/{workspace_id}",
+    response_model=SuccessResponse[WorkspaceResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Get workspace details",
+    operation_id="xemWorkspace",
+)
+async def get_workspace(
+    workspace_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: WorkspaceService = Depends(get_workspace_service),
+) -> SuccessResponse[WorkspaceResponse]:
+    """Retrieve details of a single workspace by ID."""
+    workspace = await service.get_workspace_by_id(current_user, workspace_id)
+    return SuccessResponse(data=workspace)
+
+
+@router.patch(
+    "/{workspace_id}",
+    response_model=SuccessResponse[WorkspaceResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Update workspace",
+    operation_id="capNhatWorkspace",
+)
+async def update_workspace(
+    workspace_id: UUID,
+    dto: WorkspaceUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    service: WorkspaceService = Depends(get_workspace_service),
+) -> SuccessResponse[WorkspaceResponse]:
+    """Update workspace name."""
+    workspace = await service.update_workspace(current_user, workspace_id, dto)
+    return SuccessResponse(data=workspace)
+
+
+@router.delete(
+    "/{workspace_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete workspace",
+    operation_id="xoaWorkspace",
+)
+async def delete_workspace(
+    workspace_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: WorkspaceService = Depends(get_workspace_service),
+) -> Response:
+    """Delete workspace."""
+    await service.delete_workspace(current_user, workspace_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -799,3 +799,108 @@ async def test_delete_workspace_api_cascade_db_level(async_client: AsyncClient) 
         ).scalar_one_or_none()
         assert owner_in_db is not None
         assert owner_in_db.email == owner_email
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_detail_unauthenticated(async_client: AsyncClient) -> None:
+    """Integration test: GET /api/v1/workspaces/{id} without Bearer token returns 401."""
+    fake_id = str(uuid4())
+    response = await async_client.get(f"/api/v1/workspaces/{fake_id}")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_detail_success(async_client: AsyncClient) -> None:
+    """Integration test: GET /api/v1/workspaces/{id} returns workspace detail for member."""
+    email = f"ws_detail_{uuid4().hex[:8]}@taskhub.io"
+    password = "Password123!"
+
+    await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "full_name": "Detail User", "password": password},
+    )
+    login_res = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    access_token = login_res.json()["data"]["access_token"]
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    create_res = await async_client.post(
+        "/api/v1/workspaces",
+        json={"name": "Detail Workspace"},
+        headers=headers,
+    )
+    ws_id = create_res.json()["data"]["id"]
+
+    # GET /api/v1/workspaces/{ws_id}
+    response = await async_client.get(f"/api/v1/workspaces/{ws_id}", headers=headers)
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["id"] == ws_id
+    assert data["name"] == "Detail Workspace"
+    assert "owner_id" in data
+    assert "created_at" in data
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_detail_not_found(async_client: AsyncClient) -> None:
+    """Integration test: GET /api/v1/workspaces/{fake_id} returns 404 NOT_FOUND."""
+    email = f"ws_nf_get_{uuid4().hex[:8]}@taskhub.io"
+    password = "Password123!"
+
+    await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "full_name": "NF User", "password": password},
+    )
+    login_res = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    headers = {"Authorization": f"Bearer {login_res.json()['data']['access_token']}"}
+
+    fake_id = str(uuid4())
+    response = await async_client.get(f"/api/v1/workspaces/{fake_id}", headers=headers)
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_detail_non_member_forbidden(async_client: AsyncClient) -> None:
+    """Integration test: User A accessing User B's workspace returns 403 FORBIDDEN."""
+    # User B (Owner)
+    email_b = f"user_b_ws_{uuid4().hex[:8]}@taskhub.io"
+    password = "Password123!"
+    await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": email_b, "full_name": "User B", "password": password},
+    )
+    login_b = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": email_b, "password": password},
+    )
+    headers_b = {"Authorization": f"Bearer {login_b.json()['data']['access_token']}"}
+
+    create_res = await async_client.post(
+        "/api/v1/workspaces",
+        json={"name": "User B Workspace"},
+        headers=headers_b,
+    )
+    ws_id = create_res.json()["data"]["id"]
+
+    # User A (Non-member)
+    email_a = f"user_a_ws_{uuid4().hex[:8]}@taskhub.io"
+    await async_client.post(
+        "/api/v1/auth/register",
+        json={"email": email_a, "full_name": "User A", "password": password},
+    )
+    login_a = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": email_a, "password": password},
+    )
+    headers_a = {"Authorization": f"Bearer {login_a.json()['data']['access_token']}"}
+
+    response = await async_client.get(f"/api/v1/workspaces/{ws_id}", headers=headers_a)
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
