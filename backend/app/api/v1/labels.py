@@ -1,10 +1,12 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.redis import get_redis
 from app.models.enums import UserRole
 from app.models.user import User
 from app.schemas.common import SuccessResponse
@@ -17,9 +19,10 @@ task_label_router = APIRouter(tags=["Labels"])
 
 def get_label_service(
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ) -> LabelService:
-    """Dependency providing LabelService instance."""
-    return LabelService(db=db)
+    """Dependency providing LabelService instance with Redis client."""
+    return LabelService(db=db, redis=redis)
 
 
 @router.post(

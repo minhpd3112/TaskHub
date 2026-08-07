@@ -6,6 +6,7 @@ from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.enums import ProjectStatus, WorkspaceRole
 from app.models.project import Project
 from app.repositories.project import ProjectRepository
+from app.repositories.task import TaskRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.project import ProjectCreateRequest, ProjectUpdateRequest
 
@@ -18,10 +19,12 @@ class ProjectService:
         db: AsyncSession,
         project_repo: ProjectRepository | None = None,
         workspace_repo: WorkspaceRepository | None = None,
+        task_repo: TaskRepository | None = None,
     ) -> None:
         self.db = db
         self.project_repo = project_repo or ProjectRepository(db)
         self.workspace_repo = workspace_repo or WorkspaceRepository(db)
+        self.task_repo = task_repo or TaskRepository(db)
 
     async def _get_project_with_access_check(
         self,
@@ -124,6 +127,13 @@ class ProjectService:
             member = await self.workspace_repo.get_member(project.workspace_id, current_user_id)
             if not member:
                 raise NotFoundError("Project không tồn tại", code="NOT_FOUND")
+
+            if member.role == WorkspaceRole.EDITOR:
+                has_assigned_task = await self.task_repo.exists_assigned_task_in_project(
+                    project_id, current_user_id
+                )
+                if not has_assigned_task:
+                    raise NotFoundError("Project không tồn tại", code="NOT_FOUND")
 
         return project, task_count
 

@@ -30,7 +30,11 @@ def get_project_service(
     response_model=SuccessResponse[ProjectDetailResponse],
     status_code=status.HTTP_200_OK,
     summary="Xem chi tiết dự án",
-    description="Cho phép thành viên Workspace xem chi tiết dự án kèm số lượng task.",
+    description=(
+        "Cho phép thành viên Workspace xem chi tiết dự án kèm số lượng task. "
+        "Với vai trò EDITOR, chỉ được xem dự án có ít nhất 1 task do mình phụ trách "
+        "(nếu không có task nào sẽ nhận lỗi 404 NOT_FOUND)."
+    ),
     operation_id="layDuAn",
 )
 async def get_project_detail(

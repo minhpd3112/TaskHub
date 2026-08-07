@@ -427,3 +427,110 @@ async def test_remove_label_editor_raises_403(label_service: LabelService) -> No
         await label_service.remove_label(task_id, label_id, user_id, is_admin=False)
 
     assert exc_info.value.code == "FORBIDDEN"
+
+
+# === REDIS CACHE INVALIDATION UNIT TESTS ===
+
+
+@pytest.mark.asyncio
+async def test_assign_label_invalidates_redis_cache(label_service: LabelService) -> None:
+    """Test assign_label invalidates project tasks cache pattern tasks:project:{project_id}:*."""
+    task_id = uuid4()
+    label_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+
+    sample_project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    sample_task = Task(id=task_id, project_id=project_id, title="Test Task")
+    sample_task.project = sample_project
+    sample_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.OWNER
+    )
+    sample_label = Label(id=label_id, project_id=project_id, name="Bug", color="#EF4444")
+    created_task_label = TaskLabel(task_id=task_id, label_id=label_id)
+
+    label_service.task_repo.get_task_detail = AsyncMock(return_value=sample_task)
+    label_service.workspace_repo.get_member = AsyncMock(return_value=sample_member)
+    label_service.label_repo.get_by_id = AsyncMock(return_value=sample_label)
+    label_service.label_repo.get_task_label = AsyncMock(return_value=None)
+    label_service.label_repo.assign_label_to_task = AsyncMock(return_value=created_task_label)
+
+    mock_redis = AsyncMock()
+    cache_key = f"tasks:project:{project_id}:page_1"
+    mock_redis.keys = AsyncMock(return_value=[cache_key])
+    mock_redis.delete = AsyncMock()
+    label_service.redis = mock_redis
+
+    await label_service.assign_label(task_id, label_id, user_id, is_admin=False)
+
+    mock_redis.keys.assert_called_once_with(f"tasks:project:{project_id}:*")
+    mock_redis.delete.assert_called_once_with(cache_key)
+
+
+@pytest.mark.asyncio
+async def test_remove_label_invalidates_redis_cache(label_service: LabelService) -> None:
+    """Test remove_label invalidates project tasks cache pattern tasks:project:{project_id}:*."""
+    task_id = uuid4()
+    label_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+
+    sample_project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    sample_task = Task(id=task_id, project_id=project_id, title="Test Task")
+    sample_task.project = sample_project
+    sample_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.OWNER
+    )
+    sample_label = Label(id=label_id, project_id=project_id, name="Bug", color="#EF4444")
+
+    label_service.task_repo.get_task_detail = AsyncMock(return_value=sample_task)
+    label_service.workspace_repo.get_member = AsyncMock(return_value=sample_member)
+    label_service.label_repo.get_by_id = AsyncMock(return_value=sample_label)
+    label_service.label_repo.remove_label_from_task = AsyncMock()
+
+    mock_redis = AsyncMock()
+    cache_key = f"tasks:project:{project_id}:page_1"
+    mock_redis.keys = AsyncMock(return_value=[cache_key])
+    mock_redis.delete = AsyncMock()
+    label_service.redis = mock_redis
+
+    await label_service.remove_label(task_id, label_id, user_id, is_admin=False)
+
+    mock_redis.keys.assert_called_once_with(f"tasks:project:{project_id}:*")
+    mock_redis.delete.assert_called_once_with(cache_key)
+
+
+@pytest.mark.asyncio
+async def test_assign_label_redis_exception_handled(label_service: LabelService) -> None:
+    """Test assign_label logs warning and doesn't fail if Redis raises an exception."""
+    task_id = uuid4()
+    label_id = uuid4()
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+
+    sample_project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    sample_task = Task(id=task_id, project_id=project_id, title="Test Task")
+    sample_task.project = sample_project
+    sample_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.OWNER
+    )
+    sample_label = Label(id=label_id, project_id=project_id, name="Bug", color="#EF4444")
+    created_task_label = TaskLabel(task_id=task_id, label_id=label_id)
+
+    label_service.task_repo.get_task_detail = AsyncMock(return_value=sample_task)
+    label_service.workspace_repo.get_member = AsyncMock(return_value=sample_member)
+    label_service.label_repo.get_by_id = AsyncMock(return_value=sample_label)
+    label_service.label_repo.get_task_label = AsyncMock(return_value=None)
+    label_service.label_repo.assign_label_to_task = AsyncMock(return_value=created_task_label)
+
+    mock_redis = AsyncMock()
+    mock_redis.keys = AsyncMock(side_effect=Exception("Redis error"))
+    label_service.redis = mock_redis
+
+    task_label, label = await label_service.assign_label(task_id, label_id, user_id, is_admin=False)
+
+    assert task_label.task_id == task_id
+    assert label.id == label_id

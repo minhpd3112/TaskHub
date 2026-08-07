@@ -350,6 +350,50 @@ async def test_get_project_api_non_member_404(async_client: AsyncClient) -> None
     assert response.json()["error"]["code"] == "NOT_FOUND"
 
 
+@pytest.mark.asyncio
+async def test_get_project_detail_api_editor_with_task_success(
+    async_client: AsyncClient,
+) -> None:
+    """Integration test: EDITOR with assigned task in project gets 200 OK."""
+    _, owner_id = await _create_test_user(async_client, prefix="get_ed_owner")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="get_ed_user")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+    project = await _create_project_in_db(workspace.id, name="Editor Task Proj")
+    await _create_task_in_db(project.id, editor_id, title="Assigned to Editor")
+
+    response = await async_client.get(
+        f"/api/v1/projects/{project.id}",
+        headers=editor_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["id"] == str(project.id)
+    assert data["name"] == "Editor Task Proj"
+    assert data["task_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_project_detail_api_editor_without_task_not_found(
+    async_client: AsyncClient,
+) -> None:
+    """Integration test: EDITOR without assigned task in project gets 404 NOT_FOUND."""
+    _, owner_id = await _create_test_user(async_client, prefix="get_ed_owner2")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="get_ed_user2")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+    project = await _create_project_in_db(workspace.id, name="Editor No Task Proj")
+
+    response = await async_client.get(
+        f"/api/v1/projects/{project.id}",
+        headers=editor_headers,
+    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
 async def _create_task_in_db(
     project_id: UUID,
     user_id: UUID,

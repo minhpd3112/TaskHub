@@ -218,6 +218,79 @@ async def test_get_project_detail_idor_protection(project_service: ProjectServic
 
 
 @pytest.mark.asyncio
+async def test_get_project_detail_editor_with_task_success(
+    project_service: ProjectService,
+) -> None:
+    """Test retrieving project detail successfully for EDITOR with assigned task."""
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+    sample_project = Project(
+        id=project_id,
+        workspace_id=workspace_id,
+        name="Editor Project",
+        status=ProjectStatus.ACTIVE,
+        created_at=datetime.now(UTC),
+    )
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.EDITOR
+    )
+
+    project_service.project_repo.get_detail_with_task_count = AsyncMock(
+        return_value=(sample_project, 2)
+    )
+    project_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+    project_service.task_repo.exists_assigned_task_in_project = AsyncMock(return_value=True)
+
+    project, task_count = await project_service.get_project_detail(
+        project_id=project_id, current_user_id=user_id, is_admin=False
+    )
+
+    assert project.id == project_id
+    assert task_count == 2
+    project_service.task_repo.exists_assigned_task_in_project.assert_called_once_with(
+        project_id, user_id
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_project_detail_editor_without_task_raises_404(
+    project_service: ProjectService,
+) -> None:
+    """Test retrieving project detail for EDITOR without assigned task raises NotFoundError."""
+    project_id = uuid4()
+    workspace_id = uuid4()
+    user_id = uuid4()
+    sample_project = Project(
+        id=project_id,
+        workspace_id=workspace_id,
+        name="Editor Project No Task",
+        status=ProjectStatus.ACTIVE,
+        created_at=datetime.now(UTC),
+    )
+    editor_member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=user_id, role=WorkspaceRole.EDITOR
+    )
+
+    project_service.project_repo.get_detail_with_task_count = AsyncMock(
+        return_value=(sample_project, 5)
+    )
+    project_service.workspace_repo.get_member = AsyncMock(return_value=editor_member)
+    project_service.task_repo.exists_assigned_task_in_project = AsyncMock(return_value=False)
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await project_service.get_project_detail(
+            project_id=project_id, current_user_id=user_id, is_admin=False
+        )
+
+    assert exc_info.value.code == "NOT_FOUND"
+    assert "Project không tồn tại" in exc_info.value.message
+    project_service.task_repo.exists_assigned_task_in_project.assert_called_once_with(
+        project_id, user_id
+    )
+
+
+@pytest.mark.asyncio
 async def test_update_project_success_by_owner(
     project_service: ProjectService,
 ) -> None:

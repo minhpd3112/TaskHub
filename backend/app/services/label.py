@@ -1,5 +1,7 @@
+import logging
 from uuid import UUID
 
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
@@ -14,6 +16,8 @@ from app.repositories.task import TaskRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.label import LabelCreateRequest
 
+logger = logging.getLogger(__name__)
+
 
 class LabelService:
     """Service handling business logic for Label management."""
@@ -25,12 +29,14 @@ class LabelService:
         project_repo: ProjectRepository | None = None,
         workspace_repo: WorkspaceRepository | None = None,
         task_repo: TaskRepository | None = None,
+        redis: Redis | None = None,
     ) -> None:
         self.db = db
         self.label_repo = label_repo or LabelRepository(db)
         self.project_repo = project_repo or ProjectRepository(db)
         self.workspace_repo = workspace_repo or WorkspaceRepository(db)
         self.task_repo = task_repo or TaskRepository(db)
+        self.redis = redis
 
     async def _get_project_with_access(
         self,
@@ -172,6 +178,16 @@ class LabelService:
             return existing_task_label, label
 
         task_label = await self.label_repo.assign_label_to_task(task_id, label_id)
+
+        # Invalidate Redis Cache for project tasks list
+        if self.redis:
+            try:
+                keys = await self.redis.keys(f"tasks:project:{task.project_id}:*")
+                if keys:
+                    await self.redis.delete(*keys)
+            except Exception as exc:
+                logger.warning(f"Failed to invalidate task list cache in Redis: {exc}")
+
         return task_label, label
 
     async def remove_label(
@@ -208,3 +224,12 @@ class LabelService:
             )
 
         await self.label_repo.remove_label_from_task(task_id, label_id)
+
+        # Invalidate Redis Cache for project tasks list
+        if self.redis:
+            try:
+                keys = await self.redis.keys(f"tasks:project:{task.project_id}:*")
+                if keys:
+                    await self.redis.delete(*keys)
+            except Exception as exc:
+                logger.warning(f"Failed to invalidate task list cache in Redis: {exc}")
