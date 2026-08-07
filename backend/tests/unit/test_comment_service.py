@@ -425,8 +425,44 @@ async def test_delete_comment_success_owner(comment_service: CommentService) -> 
 
 
 @pytest.mark.asyncio
-async def test_delete_comment_success_editor(comment_service: CommentService) -> None:
-    """Test EDITOR deleting another user's comment successfully."""
+async def test_delete_comment_success_by_editor_author(
+    comment_service: CommentService,
+) -> None:
+    """Test EDITOR deleting their own comment successfully."""
+    task_id = uuid4()
+    workspace_id = uuid4()
+    project_id = uuid4()
+    editor_id = uuid4()
+    comment_id = uuid4()
+
+    editor_user = User(
+        id=editor_id, email="editor@taskhub.io", role=UserRole.MEMBER, full_name="Editor User"
+    )
+    project = Project(id=project_id, workspace_id=workspace_id, name="Project Alpha")
+    task = Task(id=task_id, project_id=project_id, title="Test Task")
+    task.project = project
+    member = WorkspaceMember(
+        workspace_id=workspace_id, user_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+
+    comment = Comment(id=comment_id, task_id=task_id, author_id=editor_id, content="My comment")
+
+    comment_service.task_repo.get_task_detail = AsyncMock(return_value=task)
+    comment_service.workspace_repo.get_member = AsyncMock(return_value=member)
+    comment_service.comment_repo.get_comment_by_id = AsyncMock(return_value=comment)
+
+    await comment_service.delete_comment(
+        task_id=task_id, comment_id=comment_id, current_user=editor_user
+    )
+
+    comment_service.db.delete.assert_called_once_with(comment)
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_forbidden_for_editor_on_others_comment(
+    comment_service: CommentService,
+) -> None:
+    """Test EDITOR attempting to delete another user's comment raises ForbiddenError."""
     task_id = uuid4()
     workspace_id = uuid4()
     project_id = uuid4()
@@ -450,11 +486,13 @@ async def test_delete_comment_success_editor(comment_service: CommentService) ->
     comment_service.workspace_repo.get_member = AsyncMock(return_value=member)
     comment_service.comment_repo.get_comment_by_id = AsyncMock(return_value=comment)
 
-    await comment_service.delete_comment(
-        task_id=task_id, comment_id=comment_id, current_user=editor_user
-    )
+    with pytest.raises(ForbiddenError) as exc_info:
+        await comment_service.delete_comment(
+            task_id=task_id, comment_id=comment_id, current_user=editor_user
+        )
 
-    comment_service.db.delete.assert_called_once_with(comment)
+    assert exc_info.value.code == "FORBIDDEN"
+    assert exc_info.value.message == "Bạn không có quyền xóa bình luận này."
 
 
 @pytest.mark.asyncio

@@ -127,12 +127,9 @@ class CommentService:
 
         is_admin = current_user.role == UserRole.ADMIN
         is_author = comment.author_id == current_user.id
-        is_owner_or_editor = member is not None and member.role in (
-            WorkspaceRole.OWNER,
-            WorkspaceRole.EDITOR,
-        )
+        is_owner = member is not None and member.role == WorkspaceRole.OWNER
 
-        if not (is_admin or is_author or is_owner_or_editor):
+        if not (is_admin or is_author or is_owner):
             raise ForbiddenError("Bạn không có quyền xóa bình luận này.", code="FORBIDDEN")
 
         await self.db.delete(comment)

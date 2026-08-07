@@ -556,8 +556,40 @@ async def test_delete_comment_success_owner(async_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_delete_comment_success_editor(async_client: AsyncClient) -> None:
-    """Workspace EDITOR deletes another user's comment -> 204 No Content."""
+async def test_delete_comment_success_by_editor_author(async_client: AsyncClient) -> None:
+    """Workspace EDITOR deletes their own comment -> 204 No Content."""
+    owner_headers, owner_id = await _create_test_user(async_client, prefix="owner")
+    editor_headers, editor_id = await _create_test_user(async_client, prefix="editor")
+    workspace = await _create_workspace_with_member(
+        owner_id=owner_id, member_id=editor_id, role=WorkspaceRole.EDITOR
+    )
+    project = await _create_project_in_db(workspace_id=workspace.id)
+    task = await _create_task_in_db(
+        project_id=project.id, assignee_id=owner_id, created_by=owner_id
+    )
+
+    # Post comment as editor
+    create_res = await async_client.post(
+        f"/api/v1/tasks/{task.id}/comments",
+        headers=editor_headers,
+        json={"content": "Editor comment to be deleted by editor author"},
+    )
+    assert create_res.status_code == 201
+    comment_id = create_res.json()["data"]["id"]
+
+    # Delete comment as editor (author)
+    del_res = await async_client.delete(
+        f"/api/v1/tasks/{task.id}/comments/{comment_id}",
+        headers=editor_headers,
+    )
+    assert del_res.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_forbidden_editor_on_others_comment(
+    async_client: AsyncClient,
+) -> None:
+    """Workspace EDITOR attempting to delete another user's comment -> 403 FORBIDDEN."""
     owner_headers, owner_id = await _create_test_user(async_client, prefix="owner")
     editor_headers, editor_id = await _create_test_user(async_client, prefix="editor")
     workspace = await _create_workspace_with_member(
@@ -572,17 +604,18 @@ async def test_delete_comment_success_editor(async_client: AsyncClient) -> None:
     create_res = await async_client.post(
         f"/api/v1/tasks/{task.id}/comments",
         headers=owner_headers,
-        json={"content": "Owner comment deleted by editor"},
+        json={"content": "Owner comment that editor cannot delete"},
     )
     assert create_res.status_code == 201
     comment_id = create_res.json()["data"]["id"]
 
-    # Delete comment as editor
+    # Editor attempts to delete owner's comment
     del_res = await async_client.delete(
         f"/api/v1/tasks/{task.id}/comments/{comment_id}",
         headers=editor_headers,
     )
-    assert del_res.status_code == 204
+    assert del_res.status_code == 403
+    assert del_res.json()["error"]["code"] == "FORBIDDEN"
 
 
 @pytest.mark.asyncio
